@@ -1072,6 +1072,7 @@ export default function App() {
   const [authStep, setAuthStep] = useState('role');  // 'role' | 'adminLogin' | 'cleanerLogin'
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [authLoaded, setAuthLoaded] = useState(false);
+  const [editingService, setEditingService] = useState(null);
 
   useEffect(() => {
     async function load() {
