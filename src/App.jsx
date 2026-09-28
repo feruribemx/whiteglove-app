@@ -8,20 +8,104 @@ import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip,
   ResponsiveContainer, LabelList
 } from 'recharts';
+import { createClient } from '@supabase/supabase-js';
 
-// ---------- Polyfill: window.storage → localStorage ----------
+// ---------- Supabase ----------
+const SUPABASE_URL = 'https://mijeqjelqxdyrdfysndb.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pamVxamVscXhkeXJkZnlzbmRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0ODk3ODEsImV4cCI6MjEwNTA2NTc4MX0.-uDDOD8Z8XxTYY3H8W4woGHHxq-mu2kiPGcFIXrHsA4';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  realtime: { params: { eventsPerSecond: 10 } },
+});
+
+// Session storage stays local (auth is device-local)
 if (typeof window !== 'undefined') {
   window.storage = window.storage || {
-    get: async (key) => {
-      try { const value = localStorage.getItem(key); return value !== null ? { value } : null; } catch (e) { return null; }
-    },
-    set: async (key, value) => {
-      try { localStorage.setItem(key, value); return { value }; } catch (e) { return null; }
-    },
-    delete: async (key) => {
-      try { localStorage.removeItem(key); return { deleted: true }; } catch (e) { return null; }
-    },
+    get: async (key) => { try { const v = localStorage.getItem(key); return v !== null ? { value: v } : null; } catch(e) { return null; } },
+    set: async (key, value) => { try { localStorage.setItem(key, value); return { value }; } catch(e) { return null; } },
+    delete: async (key) => { try { localStorage.removeItem(key); return { deleted: true }; } catch(e) { return null; } },
   };
+}
+
+// ---------- DB transforms ----------
+const svcFromDb = (r) => ({
+  id: Number(r.id),
+  fecha: r.fecha,
+  unidad: r.unidad,
+  cleaners: r.cleaners || [],
+  cleaner: (r.cleaners || [])[0] || '',
+  horas: Number(r.horas),
+  tipo: r.tipo,
+  cobro: r.cobro !== null && r.cobro !== undefined ? Number(r.cobro) : null,
+  pagoCleaner: r.pago_cleaner !== null && r.pago_cleaner !== undefined ? Number(r.pago_cleaner) : null,
+  capturista: r.capturista || '',
+});
+const svcToDb = (s) => ({
+  id: s.id,
+  fecha: s.fecha,
+  unidad: s.unidad,
+  cleaners: s.cleaners && s.cleaners.length ? s.cleaners : (s.cleaner ? [s.cleaner] : []),
+  horas: s.horas,
+  tipo: s.tipo,
+  cobro: s.cobro,
+  pago_cleaner: s.pagoCleaner,
+  capturista: s.capturista || null,
+});
+const stockUnitFromDb = (r) => ({
+  id: r.id, cat: r.categoria, prod: r.producto, unit: r.unidad_medida,
+  qty: Number(r.qty), min: Number(r.min_qty),
+});
+const stockStorageFromDb = (r) => ({
+  id: Number(r.id), cat: r.categoria, prod: r.producto, unit: r.unidad_medida,
+  qty: Number(r.qty), min: Number(r.min_qty),
+});
+
+// Fetchers
+async function fetchAllServices() {
+  const { data, error } = await supabase.from('services').select('*').order('fecha', { ascending: false });
+  if (error) { console.error('fetch services', error); return []; }
+  return (data || []).map(svcFromDb);
+}
+async function fetchStockByUnit(UNITS_LIST, TEMPLATE) {
+  const { data, error } = await supabase.from('stock_by_unit').select('*');
+  if (error) { console.error('fetch stock_by_unit', error); return null; }
+  if (!data || data.length === 0) return null;
+  const grouped = {};
+  for (const row of data) {
+    if (!grouped[row.unidad]) grouped[row.unidad] = [];
+    grouped[row.unidad].push(stockUnitFromDb(row));
+  }
+  for (const u of UNITS_LIST) {
+    if (!grouped[u]) grouped[u] = TEMPLATE.map((it, i) => ({ ...it, id: `${u}-${i}` }));
+  }
+  return grouped;
+}
+async function fetchStockStorage() {
+  const { data, error } = await supabase.from('stock_storage').select('*');
+  if (error) { console.error('fetch stock_storage', error); return null; }
+  if (!data || data.length === 0) return null;
+  return data.map(stockStorageFromDb);
+}
+async function seedStockByUnit(UNITS_LIST, TEMPLATE) {
+  const rows = [];
+  for (const unidad of UNITS_LIST) {
+    TEMPLATE.forEach((item, i) => {
+      rows.push({
+        id: `${unidad}-${i}`, unidad,
+        categoria: item.cat, producto: item.prod, unidad_medida: item.unit,
+        qty: item.qty, min_qty: item.min,
+      });
+    });
+  }
+  const { error } = await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
+  if (error) console.error('seed stock_by_unit', error);
+}
+async function seedStockStorage(items) {
+  const rows = items.map((item) => ({
+    id: item.id, categoria: item.cat, producto: item.prod,
+    unidad_medida: item.unit, qty: item.qty, min_qty: item.min,
+  }));
+  const { error } = await supabase.from('stock_storage').upsert(rows, { onConflict: 'id' });
+  if (error) console.error('seed stock_storage', error);
 }
 
 const LOGO_URI = 'data:image/webp;base64,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';
@@ -1005,12 +1089,47 @@ export default function App() {
           }
         }
       } catch (e) {}
-      try { const r = await window.storage.get('wg-services'); if (r?.value) setServices(JSON.parse(r.value)); } catch (e) {}
-      try { const r = await window.storage.get('wg-stock-by-unit'); if (r?.value) setStockByUnit(JSON.parse(r.value)); } catch (e) {}
-      try { const r = await window.storage.get('wg-stock-storage'); if (r?.value) setStockStorage(JSON.parse(r.value)); } catch (e) {}
+
+      // Load from Supabase (cloud-synced)
+      const [svcs, byUnit, storage] = await Promise.all([
+        fetchAllServices(),
+        fetchStockByUnit(UNITS, UNIT_STOCK_TEMPLATE),
+        fetchStockStorage(),
+      ]);
+      setServices(svcs);
+      if (byUnit) {
+        setStockByUnit(byUnit);
+      } else {
+        setStockByUnit(INITIAL_STOCK_BY_UNIT);
+        seedStockByUnit(UNITS, UNIT_STOCK_TEMPLATE);
+      }
+      if (storage) {
+        setStockStorage(storage);
+      } else {
+        setStockStorage(INITIAL_STOCK_STORAGE);
+        seedStockStorage(INITIAL_STOCK_STORAGE);
+      }
       setAuthLoaded(true);
     }
     load();
+
+    // Realtime subscriptions — all clients update within seconds of any change
+    const ch = supabase
+      .channel('wg-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'services' }, async () => {
+        setServices(await fetchAllServices());
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_by_unit' }, async () => {
+        const next = await fetchStockByUnit(UNITS, UNIT_STOCK_TEMPLATE);
+        if (next) setStockByUnit(next);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_storage' }, async () => {
+        const next = await fetchStockStorage();
+        if (next) setStockStorage(next);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(ch); };
   }, []);
 
   async function handleLogin(user) {
@@ -1026,25 +1145,40 @@ export default function App() {
     try { await window.storage.delete('wg-current-user'); } catch (e) {}
   }
 
-  async function saveServices(next) { setServices(next); try { await window.storage.set('wg-services', JSON.stringify(next)); } catch (e) {} }
-  async function saveByUnit(next) { setStockByUnit(next); try { await window.storage.set('wg-stock-by-unit', JSON.stringify(next)); } catch (e) {} }
-  async function saveStorage(next) { setStockStorage(next); try { await window.storage.set('wg-stock-storage', JSON.stringify(next)); } catch (e) {} }
-
-  function addService(svc) { saveServices([svc, ...services]); setShowAdd(false); setTab('registro'); }
-  function deleteService(id) { saveServices(services.filter((s) => s.id !== id)); }
-  function updateService(updated) {
-    saveServices(services.map((s) => s.id === updated.id ? updated : s));
+  async function addService(svc) {
+    // Optimistic: show immediately, then sync
+    setServices([svc, ...services]);
+    setShowAdd(false);
+    setTab('registro');
+    const { error } = await supabase.from('services').insert(svcToDb(svc));
+    if (error) { console.error('insert service', error); alert('Error al guardar: ' + error.message); }
+  }
+  async function updateService(updated) {
+    setServices(services.map((s) => s.id === updated.id ? updated : s));
     setEditingService(null);
     setShowAdd(false);
+    const { error } = await supabase.from('services').update(svcToDb(updated)).eq('id', updated.id);
+    if (error) { console.error('update service', error); alert('Error al actualizar: ' + error.message); }
+  }
+  async function deleteService(id) {
+    setServices(services.filter((s) => s.id !== id));
+    const { error } = await supabase.from('services').delete().eq('id', id);
+    if (error) { console.error('delete service', error); }
   }
   function openEdit(svc) {
     setEditingService(svc);
     setShowAdd(true);
   }
-  function updateUnitStock(unitName, id, qty) {
-    saveByUnit({ ...stockByUnit, [unitName]: stockByUnit[unitName].map((i) => i.id === id ? { ...i, qty } : i) });
+  async function updateUnitStock(unitName, id, qty) {
+    setStockByUnit({ ...stockByUnit, [unitName]: (stockByUnit[unitName] || []).map((i) => i.id === id ? { ...i, qty } : i) });
+    const { error } = await supabase.from('stock_by_unit').update({ qty }).eq('id', id);
+    if (error) console.error('update stock_by_unit', error);
   }
-  function updateStorage(id, qty) { saveStorage(stockStorage.map((i) => i.id === id ? { ...i, qty } : i)); }
+  async function updateStorage(id, qty) {
+    setStockStorage(stockStorage.map((i) => i.id === id ? { ...i, qty } : i));
+    const { error } = await supabase.from('stock_storage').update({ qty }).eq('id', id);
+    if (error) console.error('update stock_storage', error);
+  }
 
   const globalStyle = (
     <style>{`
