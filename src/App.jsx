@@ -10,27 +10,16 @@ import {
 } from 'recharts';
 
 // ---------- Polyfill: window.storage → localStorage ----------
-// La app originalmente usaba una API de storage propietaria; aquí la mapeamos a
-// localStorage del navegador para que funcione en producción (Vercel).
 if (typeof window !== 'undefined') {
   window.storage = window.storage || {
     get: async (key) => {
-      try {
-        const value = localStorage.getItem(key);
-        return value !== null ? { value } : null;
-      } catch (e) { return null; }
+      try { const value = localStorage.getItem(key); return value !== null ? { value } : null; } catch (e) { return null; }
     },
     set: async (key, value) => {
-      try {
-        localStorage.setItem(key, value);
-        return { value };
-      } catch (e) { return null; }
+      try { localStorage.setItem(key, value); return { value }; } catch (e) { return null; }
     },
     delete: async (key) => {
-      try {
-        localStorage.removeItem(key);
-        return { deleted: true };
-      } catch (e) { return null; }
+      try { localStorage.removeItem(key); return { deleted: true }; } catch (e) { return null; }
     },
   };
 }
@@ -63,9 +52,9 @@ const c = {
   terraLight: '#F4E1D6',
 };
 
-const CLEANERS = ['Jazz', 'Karen', 'Kary'];
+const CLEANERS = ['Jazz', 'Karen', 'Kary', 'Ruben', 'Mafer'];
 const UNITS = ['Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Larisse N',
-               'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha'];
+               'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha', 'Max - Hamilton'];
 const HOURS = Array.from({ length: 25 }, (_, i) => 1 + i * 0.25);
 const TYPES = ['Limpieza', 'Extra Task'];
 const CAPTURISTAS = ['Fer Castil', 'Michelle Lopez', 'WhiteGlove'];
@@ -131,6 +120,13 @@ const monthLabel = (key) => {
 };
 const inMonth = (iso, monthKey) => iso && iso.startsWith(monthKey);
 const countLow = (items) => items.filter((i) => i.qty < i.min).length;
+
+// Devuelve el array de cleaners de un servicio (compatible con formato viejo)
+const cleanersOf = (svc) => {
+  if (Array.isArray(svc.cleaners) && svc.cleaners.length) return svc.cleaners;
+  if (svc.cleaner) return [svc.cleaner];
+  return [];
+};
 
 function BrandHeader() {
   return (
@@ -376,60 +372,105 @@ function KPI({ label, value, sub, accent, icon: Icon }) {
   );
 }
 
-function ServiceCard({ svc, onDelete }) {
+function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
   const isExtra = svc.tipo === 'Extra Task';
+  const cleanersList = cleanersOf(svc);
+  const cleanersDisplay = cleanersList.length > 1
+    ? `${cleanersList.slice(0, 2).join(' + ')}${cleanersList.length > 2 ? ` +${cleanersList.length - 2}` : ''}`
+    : (cleanersList[0] || '—');
+  const utilidad = (svc.cobro != null && svc.pagoCleaner != null) ? svc.cobro - svc.pagoCleaner : null;
+
   return (
     <div className="rounded-2xl p-4 mb-3 flex items-center gap-3" style={{ background: c.paper, boxShadow: '0 1px 6px rgba(43,41,38,0.04)' }}>
-      <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: isExtra ? c.blushSoft : c.apricotPale }}>
-        <div className="text-xs font-bold tracking-tight" style={{ color: isExtra ? c.blushDeep : c.navy }}>
-          {(() => {
-            if (!svc.fecha) return '';
-            const [, m, d] = svc.fecha.split('-');
-            return `${d}/${m}`;
-          })()}
-        </div>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-sm truncate" style={{ color: c.charcoal }}>{svc.unidad}</span>
-          {isExtra && <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ background: c.blushSoft, color: c.blushDeep }}>EXTRA</span>}
-        </div>
-        <div className="text-xs mt-0.5" style={{ color: c.graytext }}>{svc.cleaner} · {svc.horas}h{svc.cobro != null && svc.cobro !== '' ? ` · ${fmtMoney(svc.cobro)}` : ''}</div>
-        {svc.capturista && (
-          <div className="text-[10px] mt-1 italic" style={{ color: c.graytext, opacity: 0.7 }}>
-            capturado por {svc.capturista}
+      <button
+        onClick={isAdmin && onEdit ? () => onEdit(svc) : undefined}
+        className="flex items-center gap-3 flex-1 min-w-0 text-left"
+        style={{ cursor: isAdmin && onEdit ? 'pointer' : 'default' }}
+      >
+        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: isExtra ? c.blushSoft : c.apricotPale }}>
+          <div className="text-xs font-bold tracking-tight" style={{ color: isExtra ? c.blushDeep : c.navy }}>
+            {(() => {
+              if (!svc.fecha) return '';
+              const [, m, d] = svc.fecha.split('-');
+              return `${d}/${m}`;
+            })()}
           </div>
-        )}
-      </div>
-      <button onClick={() => onDelete(svc.id)} className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-        <Trash2 size={13} style={{ color: c.graytext }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm truncate" style={{ color: c.charcoal }}>{svc.unidad}</span>
+            {isExtra && <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ background: c.blushSoft, color: c.blushDeep }}>EXTRA</span>}
+            {cleanersList.length > 1 && <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ background: c.apricotPale, color: c.apricot }}>{cleanersList.length}×</span>}
+          </div>
+          <div className="text-xs mt-0.5" style={{ color: c.graytext }}>
+            {cleanersDisplay} · {svc.horas}h{svc.cobro != null && svc.cobro !== '' ? ` · ${fmtMoney(svc.cobro)}` : ''}
+          </div>
+          {isAdmin && (svc.pagoCleaner != null || utilidad != null) && (
+            <div className="text-[10px] mt-1 flex items-center gap-2">
+              {svc.pagoCleaner != null && <span style={{ color: c.graytext }}>Pago: <b style={{ color: c.charcoal }}>{fmtMoney(svc.pagoCleaner)}</b></span>}
+              {utilidad != null && (
+                <span style={{ color: utilidad >= 0 ? c.sage : c.terra }}>
+                  Utilidad: <b>{fmtMoney(utilidad)}</b>
+                </span>
+              )}
+            </div>
+          )}
+          {svc.capturista && (
+            <div className="text-[10px] mt-1 italic" style={{ color: c.graytext, opacity: 0.7 }}>
+              capturado por {svc.capturista}
+            </div>
+          )}
+        </div>
       </button>
+      {isAdmin && onDelete && (
+        <button onClick={() => onDelete(svc.id)} className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
+          <Trash2 size={13} style={{ color: c.graytext }} />
+        </button>
+      )}
     </div>
   );
 }
 
-function AddServiceModal({ onClose, onSave, currentUser }) {
+function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingService }) {
   const isCleaner = currentUser?.role === 'cleaner';
-  const [fecha, setFecha] = useState(todayISO());
-  const [unidad, setUnidad] = useState('');
-  const [cleaner, setCleaner] = useState(isCleaner ? currentUser.cleanerName : '');
-  const [horas, setHoras] = useState('');
-  const [tipo, setTipo] = useState('Limpieza');
-  const [cobro, setCobro] = useState('');
-  const [capturista, setCapturista] = useState(isCleaner ? currentUser.cleanerName : '');
-  // Cleaners: cobro is optional; capturista is auto-set to their name
+  const isEditing = !!existingService;
+  const initialCleaners = existingService
+    ? (Array.isArray(existingService.cleaners) ? existingService.cleaners : (existingService.cleaner ? [existingService.cleaner] : []))
+    : (isCleaner ? [currentUser.cleanerName] : []);
+
+  const [fecha, setFecha] = useState(existingService?.fecha || todayISO());
+  const [unidad, setUnidad] = useState(existingService?.unidad || '');
+  const [cleaners, setCleaners] = useState(initialCleaners);
+  const [horas, setHoras] = useState(existingService?.horas != null ? String(existingService.horas) : '');
+  const [tipo, setTipo] = useState(existingService?.tipo || 'Limpieza');
+  const [cobro, setCobro] = useState(existingService?.cobro != null ? String(existingService.cobro) : '');
+  const [pagoCleaner, setPagoCleaner] = useState(existingService?.pagoCleaner != null ? String(existingService.pagoCleaner) : '');
+  const [capturista, setCapturista] = useState(existingService?.capturista || (isCleaner ? currentUser.cleanerName : ''));
+
   const canSave = isCleaner
-    ? (fecha && unidad && cleaner && horas && tipo)
-    : (fecha && unidad && cleaner && horas && tipo && cobro !== '' && capturista);
+    ? (fecha && unidad && cleaners.length > 0 && horas && tipo)
+    : (fecha && unidad && cleaners.length > 0 && horas && tipo && cobro !== '' && capturista);
+
+  function toggleCleaner(name) {
+    // Cleaner logueada: su nombre queda fijo (no puede quitarse a sí misma)
+    if (isCleaner && name === currentUser.cleanerName && cleaners.includes(name)) return;
+    setCleaners(cleaners.includes(name) ? cleaners.filter((n) => n !== name) : [...cleaners, name]);
+  }
 
   function handleSave() {
     if (!canSave) return;
-    onSave({
-      id: Date.now(), fecha, unidad, cleaner,
+    const payload = {
+      id: existingService?.id || Date.now(),
+      fecha, unidad,
+      cleaners,
+      cleaner: cleaners[0] || '', // compat con código viejo
       horas: parseFloat(horas), tipo,
       cobro: cobro === '' ? null : parseFloat(cobro) || 0,
+      pagoCleaner: pagoCleaner === '' ? null : parseFloat(pagoCleaner) || 0,
       capturista,
-    });
+    };
+    if (isEditing) onUpdate(payload);
+    else onSave(payload);
   }
 
   const field = (label, children) => (
@@ -445,6 +486,18 @@ function AddServiceModal({ onClose, onSave, currentUser }) {
       {val}
     </button>
   );
+  const multiPill = (val) => {
+    const active = cleaners.includes(val);
+    const locked = isCleaner && val === currentUser.cleanerName;
+    return (
+      <button key={val} onClick={() => toggleCleaner(val)}
+        className="px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-1.5"
+        style={{ background: active ? c.gold : c.cream, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.gold : c.divider}`, opacity: locked ? 0.9 : 1 }}>
+        {active && <span style={{ fontSize: 10 }}>✓</span>}
+        {val}
+      </button>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(43,41,38,0.4)' }} onClick={onClose}>
@@ -454,9 +507,9 @@ function AddServiceModal({ onClose, onSave, currentUser }) {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Sparkles size={12} style={{ color: c.gold }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.gold }}>NUEVO</span>
+              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.gold }}>{isEditing ? 'EDITAR' : 'NUEVO'}</span>
             </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>Registrar servicio</h2>
+            <h2 className="text-2xl font-serif" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>{isEditing ? 'Editar servicio' : 'Registrar servicio'}</h2>
           </div>
           <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.cream }}>
             <X size={16} style={{ color: c.charcoal }} />
@@ -469,7 +522,9 @@ function AddServiceModal({ onClose, onSave, currentUser }) {
             {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         )}
-        {!isCleaner && field('Cleaner', <div className="flex gap-2 flex-wrap">{CLEANERS.map((cl) => pillButton(cl, cleaner, setCleaner))}</div>)}
+        {field(cleaners.length > 1 ? `Cleaners (${cleaners.length})` : 'Cleaners',
+          <div className="flex gap-2 flex-wrap">{CLEANERS.map((cl) => multiPill(cl))}</div>
+        )}
         {field('Horas',
           <select value={horas} onChange={(e) => setHoras(e.target.value)} className="w-full px-4 py-3 rounded-2xl outline-none appearance-none" style={inputStyle}>
             <option value="">Selecciona horas</option>
@@ -477,16 +532,23 @@ function AddServiceModal({ onClose, onSave, currentUser }) {
           </select>
         )}
         {field('Tipo de servicio', <div className="flex gap-2">{TYPES.map((t) => pillButton(t, tipo, setTipo))}</div>)}
-        {field(isCleaner ? 'Cobro (opcional)' : 'Cobro',
+        {field(isCleaner ? 'Cobro al cliente (opcional)' : 'Cobro al cliente',
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
             <input type="number" inputMode="decimal" value={cobro} onChange={(e) => setCobro(e.target.value)} placeholder={isCleaner ? "Puedes dejarlo en blanco" : "0"} className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
           </div>
         )}
+        {!isCleaner && field(
+          <span className="flex items-center gap-1.5">Pago al cleaner <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
+            <input type="number" inputMode="decimal" value={pagoCleaner} onChange={(e) => setPagoCleaner(e.target.value)} placeholder="0" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+          </div>
+        )}
         {!isCleaner && field('Capturado por', <div className="flex gap-2 flex-wrap">{CAPTURISTAS.map((p) => pillButton(p, capturista, setCapturista))}</div>)}
         <button onClick={handleSave} disabled={!canSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide mt-2 transition-all"
           style={{ background: canSave ? c.charcoal : c.divider, color: canSave ? c.paper : c.graytext, opacity: canSave ? 1 : 0.6 }}>
-          GUARDAR SERVICIO
+          {isEditing ? 'GUARDAR CAMBIOS' : 'GUARDAR SERVICIO'}
         </button>
       </div>
     </div>
@@ -499,6 +561,7 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
   const totalSvcs = monthSvcs.length;
   const totalHrs = monthSvcs.reduce((sum, s) => sum + (s.horas || 0), 0);
   const totalRev = monthSvcs.reduce((sum, s) => sum + (s.cobro || 0), 0);
+  const totalPaid = monthSvcs.reduce((sum, s) => sum + (s.pagoCleaner || 0), 0);
   const ticket = totalSvcs ? totalRev / totalSvcs : 0;
   const recent = [...services].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).slice(0, 4);
 
@@ -510,8 +573,12 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
         <div className="grid grid-cols-2 gap-3 mb-6">
           <KPI label="Servicios" value={totalSvcs} sub="este mes" accent={c.gold} icon={Sparkles} />
           <KPI label="Horas" value={totalHrs.toFixed(2).replace(/\.?0+$/, '')} sub="trabajadas" accent={c.sage} icon={Clock} />
-          <KPI label="Ingresos" value={fmtMoney(totalRev)} sub="acumulado" accent={c.blushDeep} icon={DollarSign} />
-          <KPI label="Ticket prom." value={fmtMoney(ticket)} sub="por servicio" accent={c.terra} icon={TrendingUp} />
+          <KPI label="Ingresos" value={fmtMoney(totalRev)} sub="cobro clientes" accent={c.blushDeep} icon={DollarSign} />
+          {currentUser?.role === 'admin' ? (
+            <KPI label="Utilidad" value={fmtMoney(totalRev - totalPaid)} sub={`pagos: ${fmtMoney(totalPaid)}`} accent={c.terra} icon={TrendingUp} />
+          ) : (
+            <KPI label="Ticket prom." value={fmtMoney(ticket)} sub="por servicio" accent={c.terra} icon={TrendingUp} />
+          )}
         </div>
         <div className="flex items-center justify-between mb-3 mt-2">
           <h2 className="text-lg font-serif" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>Últimos servicios</h2>
@@ -528,23 +595,23 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
             <div className="text-xs" style={{ color: c.graytext }}>Toca el botón + para registrar el primero</div>
           </div>
         ) : (
-          recent.map((s) => <ServiceCard key={s.id} svc={s} onDelete={() => {}} />)
+          recent.map((s) => <ServiceCard key={s.id} svc={s} isAdmin={currentUser?.role === 'admin'} />)
         )}
       </div>
     </div>
   );
 }
 
-function RegistroTab({ services, onDelete, currentUser, onOpenMenu }) {
+function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
   const isCleaner = currentUser?.role === 'cleaner';
   const [filter, setFilter] = useState('todos');
   const [filterCleaner, setFilterCleaner] = useState('todas');
   const [filterCap, setFilterCap] = useState('todos');
   let list = [...services].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   // Cleaners only see their own services
-  if (isCleaner) list = list.filter((s) => s.cleaner === currentUser.cleanerName);
+  if (isCleaner) list = list.filter((s) => cleanersOf(s).includes(currentUser.cleanerName));
   if (filter !== 'todos') list = list.filter((s) => s.tipo === filter);
-  if (!isCleaner && filterCleaner !== 'todas') list = list.filter((s) => s.cleaner === filterCleaner);
+  if (!isCleaner && filterCleaner !== 'todas') list = list.filter((s) => cleanersOf(s).includes(filterCleaner));
   if (!isCleaner && filterCap !== 'todos') list = list.filter((s) => s.capturista === filterCap);
 
   const chip = (label, val, current, setter) => (
@@ -584,7 +651,7 @@ function RegistroTab({ services, onDelete, currentUser, onOpenMenu }) {
         {list.length === 0 ? (
           <div className="rounded-2xl p-8 text-center" style={{ background: c.paper }}><div className="text-sm" style={{ color: c.graytext }}>Nada aquí todavía</div></div>
         ) : (
-          list.map((s) => <ServiceCard key={s.id} svc={s} onDelete={onDelete} />)
+          list.map((s) => <ServiceCard key={s.id} svc={s} onDelete={onDelete} onEdit={onEdit} isAdmin={!isCleaner} />)
         )}
       </div>
     </div>
@@ -594,11 +661,16 @@ function RegistroTab({ services, onDelete, currentUser, onOpenMenu }) {
 function GraficasTab({ services, currentUser, onOpenMenu }) {
   const monthKey = currentMonthKey();
   const monthSvcs = services.filter((s) => inMonth(s.fecha, monthKey));
-  const byCleaner = CLEANERS.map((cl) => ({
-    name: cl,
-    ingresos: monthSvcs.filter((s) => s.cleaner === cl).reduce((sum, s) => sum + (s.cobro || 0), 0),
-    horas: monthSvcs.filter((s) => s.cleaner === cl).reduce((sum, s) => sum + (s.horas || 0), 0),
-  }));
+  const byCleaner = CLEANERS.map((cl) => {
+    const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
+    return {
+      name: cl,
+      // Ingresos: se divide entre los cleaners del servicio
+      ingresos: svcs.reduce((sum, s) => sum + ((s.cobro || 0) / Math.max(1, cleanersOf(s).length)), 0),
+      // Horas: crédito completo a cada cleaner que trabajó
+      horas: svcs.reduce((sum, s) => sum + (s.horas || 0), 0),
+    };
+  });
   const byUnit = UNITS.map((u) => ({ name: u, servicios: monthSvcs.filter((s) => s.unidad === u).length })).filter((r) => r.servicios > 0);
   const byType = TYPES.map((t) => ({ name: t, value: monthSvcs.filter((s) => s.tipo === t).reduce((sum, s) => sum + (s.cobro || 0), 0) })).filter((r) => r.value > 0);
   const PIE_COLORS = [c.gold, c.blushDeep];
@@ -960,6 +1032,15 @@ export default function App() {
 
   function addService(svc) { saveServices([svc, ...services]); setShowAdd(false); setTab('registro'); }
   function deleteService(id) { saveServices(services.filter((s) => s.id !== id)); }
+  function updateService(updated) {
+    saveServices(services.map((s) => s.id === updated.id ? updated : s));
+    setEditingService(null);
+    setShowAdd(false);
+  }
+  function openEdit(svc) {
+    setEditingService(svc);
+    setShowAdd(true);
+  }
   function updateUnitStock(unitName, id, qty) {
     saveByUnit({ ...stockByUnit, [unitName]: stockByUnit[unitName].map((i) => i.id === id ? { ...i, qty } : i) });
   }
@@ -1001,7 +1082,7 @@ export default function App() {
         {!isCleaner && activeTab === 'graficas' && <GraficasTab services={services} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         <BottomNav tab={activeTab} setTab={setTab} onAdd={() => setShowAdd(true)} isCleaner={isCleaner} />
-        {showAdd && <AddServiceModal onClose={() => setShowAdd(false)} onSave={addService} currentUser={currentUser} />}
+        {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} />}
         {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} />}
       </div>
     </div>
