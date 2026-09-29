@@ -37,6 +37,7 @@ const svcFromDb = (r) => ({
   tipo: r.tipo,
   cobro: r.cobro !== null && r.cobro !== undefined ? Number(r.cobro) : null,
   pagoCleaner: r.pago_cleaner !== null && r.pago_cleaner !== undefined ? Number(r.pago_cleaner) : null,
+  pagosPorCleaner: r.pagos_por_cleaner || null,
   tip: r.tip !== null && r.tip !== undefined ? Number(r.tip) : null,
   capturista: r.capturista || '',
 });
@@ -49,6 +50,7 @@ const svcToDb = (s) => ({
   tipo: s.tipo,
   cobro: s.cobro,
   pago_cleaner: s.pagoCleaner,
+  pagos_por_cleaner: s.pagosPorCleaner || null,
   tip: s.tip,
   capturista: s.capturista || null,
 });
@@ -235,6 +237,81 @@ const cleanersOf = (svc) => {
   if (Array.isArray(svc.cleaners) && svc.cleaners.length) return svc.cleaners;
   if (svc.cleaner) return [svc.cleaner];
   return [];
+};
+
+// Pago que le corresponde a UN cleaner específico en un servicio
+const getPagoDeCleaner = (svc, cleaner) => {
+  if (svc.pagosPorCleaner && svc.pagosPorCleaner[cleaner] != null) {
+    return Number(svc.pagosPorCleaner[cleaner]) || 0;
+  }
+  // Fallback: formato viejo con pagoCleaner único → dividir entre cleaners
+  if (svc.pagoCleaner != null) {
+    const n = cleanersOf(svc).length;
+    return n > 0 ? Number(svc.pagoCleaner) / n : 0;
+  }
+  return 0;
+};
+
+// Suma total de pagos a cleaners en un servicio
+const getTotalPago = (svc) => {
+  if (svc.pagosPorCleaner) {
+    return Object.values(svc.pagosPorCleaner).reduce((s, v) => s + (Number(v) || 0), 0);
+  }
+  return Number(svc.pagoCleaner) || 0;
+};
+
+// Ganancia total de un cleaner en un servicio (pago + porción del tip)
+const getGananciaDeCleaner = (svc, cleaner) => {
+  const pago = getPagoDeCleaner(svc, cleaner);
+  const n = cleanersOf(svc).length;
+  const tipShare = n > 0 ? (Number(svc.tip) || 0) / n : 0;
+  return pago + tipShare;
+};
+
+// ---------- Date period helpers ----------
+const toISODate = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+};
+const getPeriodRange = (period, refDate = new Date()) => {
+  const d = new Date(refDate);
+  if (period === 'week') {
+    // Semana: lunes a domingo
+    const day = d.getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
+    const diff = day === 0 ? 6 : day - 1;
+    const start = new Date(d); start.setDate(d.getDate() - diff); start.setHours(0,0,0,0);
+    const end = new Date(start); end.setDate(start.getDate() + 6);
+    return { start: toISODate(start), end: toISODate(end) };
+  }
+  if (period === 'quincena') {
+    const day = d.getDate();
+    if (day <= 15) {
+      return {
+        start: toISODate(new Date(d.getFullYear(), d.getMonth(), 1)),
+        end:   toISODate(new Date(d.getFullYear(), d.getMonth(), 15)),
+      };
+    }
+    return {
+      start: toISODate(new Date(d.getFullYear(), d.getMonth(), 16)),
+      end:   toISODate(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
+    };
+  }
+  // month
+  return {
+    start: toISODate(new Date(d.getFullYear(), d.getMonth(), 1)),
+    end:   toISODate(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
+  };
+};
+const inRange = (iso, r) => iso && iso >= r.start && iso <= r.end;
+const periodLabel = (period, r) => {
+  const fmt = (iso) => {
+    const [, m, d] = iso.split('-');
+    const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return `${parseInt(d,10)} ${months[parseInt(m,10)-1]}`;
+  };
+  return `${fmt(r.start)} — ${fmt(r.end)}`;
 };
 
 function BrandHeader() {
@@ -577,7 +654,8 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
   const cleanersDisplay = cleanersList.length > 1
     ? `${cleanersList.slice(0, 2).join(' + ')}${cleanersList.length > 2 ? ` +${cleanersList.length - 2}` : ''}`
     : (cleanersList[0] || '—');
-  const utilidad = (svc.cobro != null && svc.pagoCleaner != null) ? svc.cobro - svc.pagoCleaner : null;
+  const totalPagoSvc = getTotalPago(svc);
+  const utilidad = (svc.cobro != null && (svc.pagosPorCleaner || svc.pagoCleaner != null)) ? svc.cobro - totalPagoSvc : null;
 
   return (
     <div className="rounded-2xl p-4 mb-3 flex items-center gap-3" style={{ background: c.paper, boxShadow: '0 1px 6px rgba(43,41,38,0.04)' }}>
@@ -604,9 +682,9 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
           <div className="text-xs mt-0.5" style={{ color: c.graytext }}>
             {cleanersDisplay} · {svc.horas}h{svc.cobro != null && svc.cobro !== '' ? ` · ${fmtMoney(svc.cobro)}` : ''}
           </div>
-          {isAdmin && (svc.pagoCleaner != null || utilidad != null || svc.tip != null) && (
+          {isAdmin && (totalPagoSvc > 0 || svc.tip != null || utilidad != null) && (
             <div className="text-[10px] mt-1 flex items-center gap-2 flex-wrap">
-              {svc.pagoCleaner != null && <span style={{ color: c.graytext }}>Pago: <b style={{ color: c.charcoal }}>{fmtMoney(svc.pagoCleaner)}</b></span>}
+              {totalPagoSvc > 0 && <span style={{ color: c.graytext }}>Pago: <b style={{ color: c.charcoal }}>{fmtMoney(totalPagoSvc)}</b></span>}
               {svc.tip != null && svc.tip > 0 && <span style={{ color: c.blushDeep }}>Tip: <b>{fmtMoney(svc.tip)}</b></span>}
               {utilidad != null && (
                 <span style={{ color: utilidad >= 0 ? c.sage : c.terra }}>
@@ -644,7 +722,23 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
   const [horas, setHoras] = useState(existingService?.horas != null ? Number(existingService.horas) : 0);
   const [tipo, setTipo] = useState(existingService?.tipo || 'Limpieza');
   const [cobro, setCobro] = useState(existingService?.cobro != null ? String(existingService.cobro) : '');
-  const [pagoCleaner, setPagoCleaner] = useState(existingService?.pagoCleaner != null ? String(existingService.pagoCleaner) : '');
+  const initialPagos = () => {
+    if (existingService?.pagosPorCleaner) {
+      const out = {};
+      Object.entries(existingService.pagosPorCleaner).forEach(([k, v]) => { out[k] = String(v); });
+      return out;
+    }
+    // Backward compat: legacy pagoCleaner divided evenly among existing cleaners
+    if (existingService?.pagoCleaner != null && initialCleaners.length > 0) {
+      const share = Number(existingService.pagoCleaner) / initialCleaners.length;
+      const out = {};
+      initialCleaners.forEach((cl) => { out[cl] = String(share); });
+      return out;
+    }
+    return {};
+  };
+  const [pagosPorCleaner, setPagosPorCleaner] = useState(initialPagos());
+  const [pagosEditedManually, setPagosEditedManually] = useState({});
   const [tip, setTip] = useState(existingService?.tip != null ? String(existingService.tip) : '');
   const [capturista, setCapturista] = useState(existingService?.capturista || (isCleaner ? currentUser.cleanerName : ''));
 
@@ -664,18 +758,29 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
   function bumpHours(delta) { setTimeMinutes(totalMinutes + delta * 60); }
   function bumpMinutes(delta) { setTimeMinutes(totalMinutes + delta * 15); }
 
-  // Auto-cálculo del pago al cleaner según tarifas configuradas.
-  // Sólo aplica si el usuario no ha editado manualmente ese campo.
-  const [pagoAutoValue, setPagoAutoValue] = useState(null);
+  // Auto-cálculo del pago para cada cleaner seleccionado.
+  // Solo aplica si el usuario no editó manualmente ese cleaner.
+  // Cuando se agrega/quita un cleaner o cambian horas/tipo, se recalcula.
   useEffect(() => {
     if (isCleaner || !rates) return;
     const suggested = calcSuggestedPay(rates, tipo, horas);
-    // Si el campo está vacío o tiene el valor auto anterior, actualízalo
-    if (pagoCleaner === '' || pagoCleaner === String(pagoAutoValue)) {
-      setPagoCleaner(suggested ? String(suggested) : '');
-      setPagoAutoValue(suggested);
-    }
-  }, [tipo, horas, rates]);
+    const next = {};
+    cleaners.forEach((cl) => {
+      if (pagosEditedManually[cl] && pagosPorCleaner[cl] != null) {
+        next[cl] = pagosPorCleaner[cl]; // preserva edición manual
+      } else {
+        next[cl] = suggested ? String(suggested) : '';
+      }
+    });
+    setPagosPorCleaner(next);
+  }, [tipo, horas, rates, cleaners.join('|')]);
+
+  function updatePagoDe(cleaner, value) {
+    setPagosPorCleaner({ ...pagosPorCleaner, [cleaner]: value });
+    setPagosEditedManually({ ...pagosEditedManually, [cleaner]: true });
+  }
+
+  const totalPago = cleaners.reduce((sum, cl) => sum + (parseFloat(pagosPorCleaner[cl]) || 0), 0);
 
   function toggleCleaner(name) {
     // Cleaner logueada: su nombre queda fijo (no puede quitarse a sí misma)
@@ -685,6 +790,16 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
 
   function handleSave() {
     if (!canSave) return;
+    // Construir pagosPorCleaner limpio (solo cleaners actuales, valores numéricos)
+    const pagosClean = {};
+    cleaners.forEach((cl) => {
+      const v = pagosPorCleaner[cl];
+      if (v !== undefined && v !== '' && v !== null) {
+        const num = parseFloat(v);
+        if (!isNaN(num)) pagosClean[cl] = num;
+      }
+    });
+    const totalPagoNum = Object.values(pagosClean).reduce((s, v) => s + v, 0);
     const payload = {
       id: existingService?.id || Date.now(),
       fecha, unidad,
@@ -692,7 +807,8 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
       cleaner: cleaners[0] || '',
       horas: Number(horas), tipo,
       cobro: cobro === '' ? null : parseFloat(cobro) || 0,
-      pagoCleaner: pagoCleaner === '' ? null : parseFloat(pagoCleaner) || 0,
+      pagoCleaner: totalPagoNum || null, // suma total, para compat con vistas viejas
+      pagosPorCleaner: Object.keys(pagosClean).length ? pagosClean : null,
       tip: tip === '' ? null : parseFloat(tip) || 0,
       capturista,
     };
@@ -795,11 +911,35 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
             <input type="number" inputMode="decimal" value={cobro} onChange={(e) => setCobro(e.target.value)} placeholder="Puedes dejarlo en blanco" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
           </div>
         )}
-        {!isCleaner && field(
-          <span className="flex items-center gap-1.5">Pago al cleaner (opcional) <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
-            <input type="number" inputMode="decimal" value={pagoCleaner} onChange={(e) => setPagoCleaner(e.target.value)} placeholder="Puedes dejarlo en blanco" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+        {!isCleaner && cleaners.length > 0 && field(
+          <span className="flex items-center gap-1.5">Pagos individuales <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
+          <div className="rounded-2xl p-3" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
+            {cleaners.map((cl, idx) => (
+              <div key={cl} className={`flex items-center gap-3 ${idx > 0 ? 'mt-2' : ''}`}>
+                <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
+                  <span className="text-[10px] font-bold" style={{ color: c.apricot }}>{initialsOf(cl)}</span>
+                </div>
+                <div className="text-sm flex-1" style={{ color: c.navy }}>{cl}</div>
+                <div className="relative flex-shrink-0" style={{ width: 110 }}>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: c.graytext }}>$</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={pagosPorCleaner[cl] || ''}
+                    onChange={(e) => updatePagoDe(cl, e.target.value)}
+                    placeholder="0"
+                    className="w-full pl-7 pr-2 py-2 rounded-xl outline-none text-right"
+                    style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 14 }}
+                  />
+                </div>
+              </div>
+            ))}
+            {cleaners.length > 1 && (
+              <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: `1px solid ${c.divider}` }}>
+                <span className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.graytext }}>Total</span>
+                <span className="text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>{fmtMoney(totalPago)}</span>
+              </div>
+            )}
           </div>
         )}
         {!isCleaner && field(
@@ -825,7 +965,7 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
   const totalSvcs = monthSvcs.length;
   const totalHrs = monthSvcs.reduce((sum, s) => sum + (s.horas || 0), 0);
   const totalRev = monthSvcs.reduce((sum, s) => sum + (s.cobro || 0), 0);
-  const totalPaid = monthSvcs.reduce((sum, s) => sum + (s.pagoCleaner || 0), 0);
+  const totalPaid = monthSvcs.reduce((sum, s) => sum + getTotalPago(s), 0);
   const ticket = totalSvcs ? totalRev / totalSvcs : 0;
   const recent = [...services].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).slice(0, 4);
 
@@ -954,6 +1094,81 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
       <Header subtitle="Gráficas" currentUser={currentUser} onOpenMenu={onOpenMenu} />
       <div className="px-6 -mt-2">
         <div className="text-sm mb-5 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>{monthLabel(monthKey)}</div>
+
+        {isAdmin && (
+          <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
+            <div className="mb-3">
+              <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.apricot }}>NÓMINA</div>
+              <h3 className="text-lg font-serif mt-0.5" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Ganancias por cleaner</h3>
+            </div>
+
+            <div className="flex gap-2 mb-4">
+              {[
+                { id: 'week', label: 'Semana' },
+                { id: 'quincena', label: 'Quincena' },
+                { id: 'month', label: 'Mes' },
+              ].map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setPeriod(p.id)}
+                  className="flex-1 py-2 rounded-full text-xs font-semibold"
+                  style={{
+                    background: period === p.id ? c.navy : c.cream,
+                    color: period === p.id ? c.paper : c.graytext,
+                    border: `1px solid ${period === p.id ? c.navy : c.divider}`,
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="text-[11px] text-center mb-3 italic" style={{ color: c.graytext }}>
+              {periodLabel(period, range)}
+            </div>
+
+            {nomina.length === 0 ? (
+              <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este período</div>
+            ) : (
+              <>
+                <div className="flex items-center px-2 pb-2" style={{ borderBottom: `1px solid ${c.divider}` }}>
+                  <div className="flex-1 text-[9px] tracking-wider uppercase font-semibold" style={{ color: c.graytext }}>Cleaner</div>
+                  <div className="w-16 text-[9px] tracking-wider uppercase font-semibold text-center" style={{ color: c.graytext }}>Horas</div>
+                  <div className="w-24 text-[9px] tracking-wider uppercase font-semibold text-right" style={{ color: c.graytext }}>Ganancias</div>
+                </div>
+                {nomina.map((row) => (
+                  <div key={row.name} className="flex items-center px-2 py-2.5" style={{ borderBottom: `1px solid ${c.divider}` }}>
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
+                        <span className="text-[10px] font-bold" style={{ color: c.apricot }}>{initialsOf(row.name)}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold truncate" style={{ color: c.navy }}>{row.name}</div>
+                        <div className="text-[10px]" style={{ color: c.graytext }}>{row.servicios} {row.servicios === 1 ? 'servicio' : 'servicios'}</div>
+                      </div>
+                    </div>
+                    <div className="w-16 text-center text-sm font-medium" style={{ color: c.charcoal }}>
+                      {row.horas.toFixed(2).replace(/\.?0+$/, '')}h
+                    </div>
+                    <div className="w-24 text-right text-sm font-bold font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>
+                      {fmtMoney(row.ganancias)}
+                    </div>
+                  </div>
+                ))}
+                <div className="flex items-center px-2 pt-3 mt-1">
+                  <div className="flex-1 text-[10px] tracking-[0.2em] uppercase font-semibold" style={{ color: c.graytext }}>Total</div>
+                  <div className="w-16 text-center text-sm font-bold" style={{ color: c.navy }}>
+                    {nomina.reduce((s, r) => s + r.horas, 0).toFixed(2).replace(/\.?0+$/, '')}h
+                  </div>
+                  <div className="w-24 text-right text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>
+                    {fmtMoney(nomina.reduce((s, r) => s + r.ganancias, 0))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <ChartCard title="Ingresos por cleaner" subtitle="ESTE MES" empty={byCleaner.every((r) => r.ingresos === 0)}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={byCleaner} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
