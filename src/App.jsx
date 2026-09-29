@@ -101,6 +101,16 @@ async function seedStockByUnit(UNITS_LIST, TEMPLATE) {
   const { error } = await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
   if (error) console.error('seed stock_by_unit', error);
 }
+async function fetchRates() {
+  const { data, error } = await supabase.from('settings').select('*').eq('key', 'rates').maybeSingle();
+  if (error) { console.error('fetch rates', error); return DEFAULT_RATES; }
+  return data?.value || DEFAULT_RATES;
+}
+async function saveRates(rates) {
+  const { error } = await supabase.from('settings').upsert({ key: 'rates', value: rates, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) console.error('save rates', error);
+}
+
 async function seedStockStorage(items) {
   const rows = items.map((item) => ({
     id: item.id, categoria: item.cat, producto: item.prod,
@@ -144,6 +154,19 @@ const UNITS = ['Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Lariss
 const HOURS = Array.from({ length: 25 }, (_, i) => 1 + i * 0.25);
 const TYPES = ['Limpieza', 'Extra Task'];
 const CAPTURISTAS = ['Fer Castil', 'Michelle Lopez', 'WhiteGlove'];
+
+const DEFAULT_RATES = {
+  'Limpieza':   { mode: 'hourly', amount: 18 },
+  'Extra Task': { mode: 'hourly', amount: 25 },
+};
+
+// Calcula el pago sugerido según tarifa configurada y duración
+function calcSuggestedPay(rates, tipo, horas) {
+  const r = rates?.[tipo];
+  if (!r || !r.amount) return 0;
+  if (r.mode === 'flat') return Number(r.amount);
+  return Number(r.amount) * (Number(horas) || 0);
+}
 
 const USERS = {
   Fernandouribe: { password: 'bfgu1108.', displayName: 'Fernando Uribe' },
@@ -228,6 +251,87 @@ function BrandHeader() {
         </div>
       </div>
     </>
+  );
+}
+
+function SettingsModal({ initialRates, onClose, onSave }) {
+  const [rates, setRates] = useState(initialRates || DEFAULT_RATES);
+
+  function updateType(tipo, patch) {
+    setRates({ ...rates, [tipo]: { ...rates[tipo], ...patch } });
+  }
+
+  function handleSave() {
+    onSave(rates);
+    onClose();
+  }
+
+  const inputStyle = { background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 };
+
+  const modePill = (tipo, mode, label) => {
+    const active = rates[tipo]?.mode === mode;
+    return (
+      <button
+        onClick={() => updateType(tipo, { mode })}
+        className="flex-1 px-4 py-2 rounded-full text-sm font-medium"
+        style={{ background: active ? c.gold : c.cream, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.gold : c.divider}` }}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
+
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles size={12} style={{ color: c.apricot }} />
+              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>ADMIN</span>
+            </div>
+            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Tarifas de pago</h2>
+            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Se aplican automáticamente al registrar servicios.</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
+            <X size={16} style={{ color: c.navy }} />
+          </button>
+        </div>
+
+        {TYPES.map((tipo) => {
+          const r = rates[tipo] || { mode: 'hourly', amount: 0 };
+          return (
+            <div key={tipo} className="rounded-2xl p-4 mb-3" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
+              <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.apricot }}>{tipo}</div>
+              <div className="flex gap-2 mb-3">
+                {modePill(tipo, 'hourly', 'Por hora')}
+                {modePill(tipo, 'flat', 'Por servicio')}
+              </div>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={r.amount}
+                  onChange={(e) => updateType(tipo, { amount: parseFloat(e.target.value) || 0 })}
+                  className="w-full pl-9 pr-16 py-3 rounded-2xl outline-none"
+                  style={{ ...inputStyle, background: c.paper }}
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs" style={{ color: c.graytext }}>
+                  CAD {r.mode === 'hourly' ? '/ hora' : '/ servicio'}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+
+        <button onClick={handleSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide mt-2" style={{ background: c.navy, color: c.paper }}>
+          GUARDAR TARIFAS
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -371,7 +475,7 @@ function CleanerLogin({ onLogin, onBack }) {
   );
 }
 
-function UserMenu({ user, onLogout, onClose }) {
+function UserMenu({ user, onLogout, onClose, onOpenSettings }) {
   const isAdmin = user.role === 'admin';
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
@@ -396,6 +500,15 @@ function UserMenu({ user, onLogout, onClose }) {
             <div className="text-xs" style={{ color: c.graytext }}>{isAdmin ? `@${user.username}` : 'Cleaner'}</div>
           </div>
         </div>
+        {user.role === 'admin' && onOpenSettings && (
+          <button
+            onClick={onOpenSettings}
+            className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
+            style={{ background: c.apricotPale, color: c.apricot }}
+          >
+            <Sparkles size={15} /> AJUSTES DE TARIFAS
+          </button>
+        )}
         <button
           onClick={onLogout}
           className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2"
@@ -518,7 +631,7 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
   );
 }
 
-function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingService }) {
+function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingService, rates }) {
   const isCleaner = currentUser?.role === 'cleaner';
   const isEditing = !!existingService;
   const initialCleaners = existingService
@@ -550,6 +663,19 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
   }
   function bumpHours(delta) { setTimeMinutes(totalMinutes + delta * 60); }
   function bumpMinutes(delta) { setTimeMinutes(totalMinutes + delta * 15); }
+
+  // Auto-cálculo del pago al cleaner según tarifas configuradas.
+  // Sólo aplica si el usuario no ha editado manualmente ese campo.
+  const [pagoAutoValue, setPagoAutoValue] = useState(null);
+  useEffect(() => {
+    if (isCleaner || !rates) return;
+    const suggested = calcSuggestedPay(rates, tipo, horas);
+    // Si el campo está vacío o tiene el valor auto anterior, actualízalo
+    if (pagoCleaner === '' || pagoCleaner === String(pagoAutoValue)) {
+      setPagoCleaner(suggested ? String(suggested) : '');
+      setPagoAutoValue(suggested);
+    }
+  }, [tipo, horas, rates]);
 
   function toggleCleaner(name) {
     // Cleaner logueada: su nombre queda fijo (no puede quitarse a sí misma)
@@ -1127,6 +1253,8 @@ export default function App() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [authLoaded, setAuthLoaded] = useState(false);
   const [editingService, setEditingService] = useState(null);
+  const [rates, setRates] = useState(DEFAULT_RATES);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -1146,11 +1274,13 @@ export default function App() {
       } catch (e) {}
 
       // Load from Supabase (cloud-synced)
-      const [svcs, byUnit, storage] = await Promise.all([
+      const [svcs, byUnit, storage, ratesData] = await Promise.all([
         fetchAllServices(),
         fetchStockByUnit(UNITS, UNIT_STOCK_TEMPLATE),
         fetchStockStorage(),
+        fetchRates(),
       ]);
+      setRates(ratesData);
       setServices(svcs);
       if (byUnit) {
         setStockByUnit(byUnit);
@@ -1181,6 +1311,9 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_storage' }, async () => {
         const next = await fetchStockStorage();
         if (next) setStockStorage(next);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, async () => {
+        setRates(await fetchRates());
       })
       .subscribe();
 
@@ -1219,6 +1352,10 @@ export default function App() {
     setServices(services.filter((s) => s.id !== id));
     const { error } = await supabase.from('services').delete().eq('id', id);
     if (error) { console.error('delete service', error); }
+  }
+  async function updateRates(nextRates) {
+    setRates(nextRates);
+    await saveRates(nextRates);
   }
   function openEdit(svc) {
     setEditingService(svc);
@@ -1271,8 +1408,9 @@ export default function App() {
         {!isCleaner && activeTab === 'graficas' && <GraficasTab services={services} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         <BottomNav tab={activeTab} setTab={setTab} onAdd={() => setShowAdd(true)} isCleaner={isCleaner} />
-        {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} />}
-        {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} />}
+        {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} rates={rates} />}
+        {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} onOpenSettings={() => { setShowUserMenu(false); setShowSettings(true); }} />}
+        {showSettings && <SettingsModal initialRates={rates} onClose={() => setShowSettings(false)} onSave={updateRates} />}
       </div>
     </div>
   );
