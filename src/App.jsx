@@ -1065,6 +1065,16 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
 function GraficasTab({ services, currentUser, onOpenMenu }) {
   const monthKey = currentMonthKey();
   const monthSvcs = services.filter((s) => inMonth(s.fecha, monthKey));
+  const isAdmin = currentUser?.role === 'admin';
+  const [period, setPeriod] = useState('week');
+  const range = getPeriodRange(period);
+  const periodSvcs = services.filter((s) => inRange(s.fecha, range));
+  const nomina = CLEANERS.map((cl) => {
+    const svcs = periodSvcs.filter((s) => cleanersOf(s).includes(cl));
+    const horas = svcs.reduce((sum, s) => sum + (s.horas || 0), 0);
+    const ganancias = svcs.reduce((sum, s) => sum + getGananciaDeCleaner(s, cl), 0);
+    return { name: cl, servicios: svcs.length, horas, ganancias };
+  }).filter((r) => r.servicios > 0 || r.ganancias > 0);
   const byCleaner = CLEANERS.map((cl) => {
     const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
     return {
