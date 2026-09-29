@@ -37,6 +37,7 @@ const svcFromDb = (r) => ({
   tipo: r.tipo,
   cobro: r.cobro !== null && r.cobro !== undefined ? Number(r.cobro) : null,
   pagoCleaner: r.pago_cleaner !== null && r.pago_cleaner !== undefined ? Number(r.pago_cleaner) : null,
+  tip: r.tip !== null && r.tip !== undefined ? Number(r.tip) : null,
   capturista: r.capturista || '',
 });
 const svcToDb = (s) => ({
@@ -48,6 +49,7 @@ const svcToDb = (s) => ({
   tipo: s.tipo,
   cobro: s.cobro,
   pago_cleaner: s.pagoCleaner,
+  tip: s.tip,
   capturista: s.capturista || null,
 });
 const stockUnitFromDb = (r) => ({
@@ -489,9 +491,10 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
           <div className="text-xs mt-0.5" style={{ color: c.graytext }}>
             {cleanersDisplay} · {svc.horas}h{svc.cobro != null && svc.cobro !== '' ? ` · ${fmtMoney(svc.cobro)}` : ''}
           </div>
-          {isAdmin && (svc.pagoCleaner != null || utilidad != null) && (
-            <div className="text-[10px] mt-1 flex items-center gap-2">
+          {isAdmin && (svc.pagoCleaner != null || utilidad != null || svc.tip != null) && (
+            <div className="text-[10px] mt-1 flex items-center gap-2 flex-wrap">
               {svc.pagoCleaner != null && <span style={{ color: c.graytext }}>Pago: <b style={{ color: c.charcoal }}>{fmtMoney(svc.pagoCleaner)}</b></span>}
+              {svc.tip != null && svc.tip > 0 && <span style={{ color: c.blushDeep }}>Tip: <b>{fmtMoney(svc.tip)}</b></span>}
               {utilidad != null && (
                 <span style={{ color: utilidad >= 0 ? c.sage : c.terra }}>
                   Utilidad: <b>{fmtMoney(utilidad)}</b>
@@ -525,15 +528,28 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
   const [fecha, setFecha] = useState(existingService?.fecha || todayISO());
   const [unidad, setUnidad] = useState(existingService?.unidad || '');
   const [cleaners, setCleaners] = useState(initialCleaners);
-  const [horas, setHoras] = useState(existingService?.horas != null ? String(existingService.horas) : '');
+  const [horas, setHoras] = useState(existingService?.horas != null ? Number(existingService.horas) : 0);
   const [tipo, setTipo] = useState(existingService?.tipo || 'Limpieza');
   const [cobro, setCobro] = useState(existingService?.cobro != null ? String(existingService.cobro) : '');
   const [pagoCleaner, setPagoCleaner] = useState(existingService?.pagoCleaner != null ? String(existingService.pagoCleaner) : '');
+  const [tip, setTip] = useState(existingService?.tip != null ? String(existingService.tip) : '');
   const [capturista, setCapturista] = useState(existingService?.capturista || (isCleaner ? currentUser.cleanerName : ''));
 
+  // Cobro y pago al cleaner son opcionales para todos (admin y cleaner).
   const canSave = isCleaner
-    ? (fecha && unidad && cleaners.length > 0 && horas && tipo)
-    : (fecha && unidad && cleaners.length > 0 && horas && tipo && cobro !== '' && capturista);
+    ? (fecha && unidad && cleaners.length > 0 && horas > 0 && tipo)
+    : (fecha && unidad && cleaners.length > 0 && horas > 0 && tipo && capturista);
+
+  // Time picker helpers (1-24 hours, minutes en incrementos de 15)
+  const totalMinutes = Math.round((horas || 0) * 60);
+  const displayH = Math.floor(totalMinutes / 60);
+  const displayM = totalMinutes % 60;
+  function setTimeMinutes(mins) {
+    const clamped = Math.max(0, Math.min(24 * 60, mins));
+    setHoras(clamped / 60);
+  }
+  function bumpHours(delta) { setTimeMinutes(totalMinutes + delta * 60); }
+  function bumpMinutes(delta) { setTimeMinutes(totalMinutes + delta * 15); }
 
   function toggleCleaner(name) {
     // Cleaner logueada: su nombre queda fijo (no puede quitarse a sí misma)
@@ -547,10 +563,11 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
       id: existingService?.id || Date.now(),
       fecha, unidad,
       cleaners,
-      cleaner: cleaners[0] || '', // compat con código viejo
-      horas: parseFloat(horas), tipo,
+      cleaner: cleaners[0] || '',
+      horas: Number(horas), tipo,
       cobro: cobro === '' ? null : parseFloat(cobro) || 0,
       pagoCleaner: pagoCleaner === '' ? null : parseFloat(pagoCleaner) || 0,
+      tip: tip === '' ? null : parseFloat(tip) || 0,
       capturista,
     };
     if (isEditing) onUpdate(payload);
@@ -609,24 +626,61 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
         {field(cleaners.length > 1 ? `Cleaners (${cleaners.length})` : 'Cleaners',
           <div className="flex gap-2 flex-wrap">{CLEANERS.map((cl) => multiPill(cl))}</div>
         )}
-        {field('Horas',
-          <select value={horas} onChange={(e) => setHoras(e.target.value)} className="w-full px-4 py-3 rounded-2xl outline-none appearance-none" style={inputStyle}>
-            <option value="">Selecciona horas</option>
-            {HOURS.map((h) => <option key={h} value={h}>{h} h</option>)}
-          </select>
+        {field('Duración',
+          <div className="rounded-2xl p-4" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
+            <div className="text-center mb-3">
+              <span className="text-4xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{displayH}</span>
+              <span className="text-lg" style={{ color: c.graytext, marginLeft: 2, marginRight: 8 }}>h</span>
+              <span className="text-4xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{String(displayM).padStart(2, '0')}</span>
+              <span className="text-lg" style={{ color: c.graytext, marginLeft: 2 }}>m</span>
+            </div>
+            <div className="flex items-center justify-center gap-6">
+              <div>
+                <div className="text-[9px] tracking-[0.2em] font-semibold uppercase text-center mb-1.5" style={{ color: c.graytext }}>Horas</div>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => bumpHours(-1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
+                    <Minus size={14} style={{ color: c.navy }} />
+                  </button>
+                  <div className="w-8 text-center font-bold" style={{ color: c.navy }}>{displayH}</div>
+                  <button type="button" onClick={() => bumpHours(1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
+                    <Plus size={14} style={{ color: c.navy }} />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <div className="text-[9px] tracking-[0.2em] font-semibold uppercase text-center mb-1.5" style={{ color: c.graytext }}>Minutos</div>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => bumpMinutes(-1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
+                    <Minus size={14} style={{ color: c.navy }} />
+                  </button>
+                  <div className="w-8 text-center font-bold" style={{ color: c.navy }}>{String(displayM).padStart(2, '0')}</div>
+                  <button type="button" onClick={() => bumpMinutes(1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
+                    <Plus size={14} style={{ color: c.navy }} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
         {field('Tipo de servicio', <div className="flex gap-2">{TYPES.map((t) => pillButton(t, tipo, setTipo))}</div>)}
-        {field(isCleaner ? 'Cobro al cliente (opcional)' : 'Cobro al cliente',
+        {field('Cobro al cliente (opcional)',
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
-            <input type="number" inputMode="decimal" value={cobro} onChange={(e) => setCobro(e.target.value)} placeholder={isCleaner ? "Puedes dejarlo en blanco" : "0"} className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+            <input type="number" inputMode="decimal" value={cobro} onChange={(e) => setCobro(e.target.value)} placeholder="Puedes dejarlo en blanco" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
           </div>
         )}
         {!isCleaner && field(
-          <span className="flex items-center gap-1.5">Pago al cleaner <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
+          <span className="flex items-center gap-1.5">Pago al cleaner (opcional) <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
-            <input type="number" inputMode="decimal" value={pagoCleaner} onChange={(e) => setPagoCleaner(e.target.value)} placeholder="0" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+            <input type="number" inputMode="decimal" value={pagoCleaner} onChange={(e) => setPagoCleaner(e.target.value)} placeholder="Puedes dejarlo en blanco" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+          </div>
+        )}
+        {!isCleaner && field(
+          <span className="flex items-center gap-1.5">Tip a la cleaner (opcional) <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
+            <input type="number" inputMode="decimal" value={tip} onChange={(e) => setTip(e.target.value)} placeholder="Si el cliente le dio propina" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
           </div>
         )}
         {!isCleaner && field('Capturado por', <div className="flex gap-2 flex-wrap">{CAPTURISTAS.map((p) => pillButton(p, capturista, setCapturista))}</div>)}
