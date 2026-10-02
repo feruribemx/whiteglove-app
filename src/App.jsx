@@ -240,6 +240,12 @@ const monthLabel = (key) => {
   return d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
 };
 const inMonth = (iso, monthKey) => iso && iso.startsWith(monthKey);
+const monthShortLabels = { '01': 'Ene', '02': 'Feb', '03': 'Mar', '04': 'Abr', '05': 'May', '06': 'Jun', '07': 'Jul', '08': 'Ago', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dic' };
+const fmtMonthKey = (key) => {
+  if (!key) return '';
+  const [y, m] = key.split('-');
+  return `${monthShortLabels[m] || m} ${y}`;
+};
 const countLow = (items) => items.filter((i) => i.qty < i.min).length;
 
 // Devuelve el array de cleaners de un servicio (compatible con formato viejo)
@@ -1142,9 +1148,18 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
   const [filter, setFilter] = useState('todos');
   const [filterCleaner, setFilterCleaner] = useState('todas');
   const [filterCap, setFilterCap] = useState('todos');
-  let list = [...services].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
-  // Cleaners only see their own services
-  if (isCleaner) list = list.filter((s) => cleanersOf(s).includes(currentUser.cleanerName));
+  const [filterMes, setFilterMes] = useState('todos');
+
+  // Base: servicios visibles a este usuario (cleaner solo ve los suyos)
+  const baseList = isCleaner
+    ? services.filter((s) => cleanersOf(s).includes(currentUser.cleanerName))
+    : services;
+
+  // Meses disponibles — extraídos de los servicios visibles, orden más reciente primero
+  const availableMonths = [...new Set(baseList.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
+
+  let list = [...baseList].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  if (filterMes !== 'todos') list = list.filter((s) => (s.fecha || '').startsWith(filterMes));
   if (filter !== 'todos') list = list.filter((s) => s.tipo === filter);
   if (!isCleaner && filterCleaner !== 'todas') list = list.filter((s) => cleanersOf(s).includes(filterCleaner));
   if (!isCleaner && filterCap !== 'todos') list = list.filter((s) => s.capturista === filterCap);
@@ -1160,6 +1175,11 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
     <div>
       <Header subtitle="Registro" currentUser={currentUser} onOpenMenu={onOpenMenu} />
       <div className="px-6 -mt-2 pb-4">
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes</div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+          {chip('Todos', 'todos', filterMes, setFilterMes)}
+          {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
+        </div>
         <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Tipo</div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
           {chip('Todos', 'todos', filter, setFilter)}
