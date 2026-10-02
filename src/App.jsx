@@ -38,6 +38,8 @@ const svcFromDb = (r) => ({
   cobro: r.cobro !== null && r.cobro !== undefined ? Number(r.cobro) : null,
   pagoCleaner: r.pago_cleaner !== null && r.pago_cleaner !== undefined ? Number(r.pago_cleaner) : null,
   pagosPorCleaner: r.pagos_por_cleaner || null,
+  ratesPorCleaner: r.rates_por_cleaner || null,
+  pagoCleaningTeam: r.pago_cleaning_team !== null && r.pago_cleaning_team !== undefined ? Number(r.pago_cleaning_team) : null,
   tip: r.tip !== null && r.tip !== undefined ? Number(r.tip) : null,
   capturista: r.capturista || '',
 });
@@ -51,6 +53,8 @@ const svcToDb = (s) => ({
   cobro: s.cobro,
   pago_cleaner: s.pagoCleaner,
   pagos_por_cleaner: s.pagosPorCleaner || null,
+  rates_por_cleaner: s.ratesPorCleaner || null,
+  pago_cleaning_team: s.pagoCleaningTeam != null ? s.pagoCleaningTeam : null,
   tip: s.tip,
   capturista: s.capturista || null,
 });
@@ -177,6 +181,12 @@ const USERS = {
 };
 
 const initialsOf = (name) => (name || '').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
+// Acceso financiero completo: solo Fernandouribe y MichelleAdmin.
+// FerCastil puede editar servicios (fecha, horas, cleaners, unidad, tipo) pero no ve ni modifica dinero.
+const hasFullAccess = (u) => u?.role === 'admin' && u?.username !== 'FerCastil';
+// Puede ver y modificar pagos (al cleaning team, a cleaner individual, tip). FerCastil SÍ puede.
+const canManagePagos = (u) => u?.role === 'admin';
 
 const UNIT_STOCK_TEMPLATE = [
   { cat: 'Químicos',     prod: 'Multiusos',              unit: 'botellas', qty: 2, min: 1 },
@@ -577,7 +587,7 @@ function UserMenu({ user, onLogout, onClose, onOpenSettings }) {
             <div className="text-xs" style={{ color: c.graytext }}>{isAdmin ? `@${user.username}` : 'Cleaner'}</div>
           </div>
         </div>
-        {user.role === 'admin' && onOpenSettings && (
+        {hasFullAccess(user) && onOpenSettings && (
           <button
             onClick={onOpenSettings}
             className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
@@ -648,14 +658,15 @@ function KPI({ label, value, sub, accent, icon: Icon }) {
   );
 }
 
-function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
+function ServiceCard({ svc, onDelete, onEdit, isAdmin, canSeeCobro, canSeePagos }) {
   const isExtra = svc.tipo === 'Extra Task';
   const cleanersList = cleanersOf(svc);
   const cleanersDisplay = cleanersList.length > 1
     ? `${cleanersList.slice(0, 2).join(' + ')}${cleanersList.length > 2 ? ` +${cleanersList.length - 2}` : ''}`
     : (cleanersList[0] || '—');
   const totalPagoSvc = getTotalPago(svc);
-  const utilidad = (svc.cobro != null && (svc.pagosPorCleaner || svc.pagoCleaner != null)) ? svc.cobro - totalPagoSvc : null;
+  const totalCost = totalPagoSvc + (Number(svc.pagoCleaningTeam) || 0);
+  const utilidad = svc.cobro != null ? svc.cobro - totalCost : null;
 
   return (
     <div className="rounded-2xl p-4 mb-3 flex items-center gap-3" style={{ background: c.paper, boxShadow: '0 1px 6px rgba(43,41,38,0.04)' }}>
@@ -680,13 +691,14 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
             {cleanersList.length > 1 && <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ background: c.apricotPale, color: c.apricot }}>{cleanersList.length}×</span>}
           </div>
           <div className="text-xs mt-0.5" style={{ color: c.graytext }}>
-            {cleanersDisplay} · {svc.horas}h{svc.cobro != null && svc.cobro !== '' ? ` · ${fmtMoney(svc.cobro)}` : ''}
+            {cleanersDisplay} · {svc.horas}h{svc.cobro != null && svc.cobro !== '' && canSeeCobro ? ` · ${fmtMoney(svc.cobro)}` : ''}
           </div>
-          {isAdmin && (totalPagoSvc > 0 || svc.tip != null || utilidad != null) && (
+          {isAdmin && (canSeePagos || canSeeCobro) && (totalPagoSvc > 0 || svc.pagoCleaningTeam > 0 || svc.tip != null || (canSeeCobro && utilidad != null)) && (
             <div className="text-[10px] mt-1 flex items-center gap-2 flex-wrap">
-              {totalPagoSvc > 0 && <span style={{ color: c.graytext }}>Pago: <b style={{ color: c.charcoal }}>{fmtMoney(totalPagoSvc)}</b></span>}
-              {svc.tip != null && svc.tip > 0 && <span style={{ color: c.blushDeep }}>Tip: <b>{fmtMoney(svc.tip)}</b></span>}
-              {utilidad != null && (
+              {canSeePagos && totalPagoSvc > 0 && <span style={{ color: c.graytext }}>Cleaner: <b style={{ color: c.charcoal }}>{fmtMoney(totalPagoSvc)}</b></span>}
+              {canSeePagos && svc.pagoCleaningTeam > 0 && <span style={{ color: c.graytext }}>Team: <b style={{ color: c.charcoal }}>{fmtMoney(svc.pagoCleaningTeam)}</b></span>}
+              {canSeePagos && svc.tip != null && svc.tip > 0 && <span style={{ color: c.blushDeep }}>Tip: <b>{fmtMoney(svc.tip)}</b></span>}
+              {canSeeCobro && utilidad != null && (
                 <span style={{ color: utilidad >= 0 ? c.sage : c.terra }}>
                   Utilidad: <b>{fmtMoney(utilidad)}</b>
                 </span>
@@ -712,6 +724,8 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin }) {
 function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingService, rates }) {
   const isCleaner = currentUser?.role === 'cleaner';
   const isEditing = !!existingService;
+  const canSeeCobro = hasFullAccess(currentUser);     // Solo Fernandouribe + Michelle
+  const canSeePagos = canManagePagos(currentUser);    // Todos los admins (incl. FerCastil)
   const initialCleaners = existingService
     ? (Array.isArray(existingService.cleaners) ? existingService.cleaners : (existingService.cleaner ? [existingService.cleaner] : []))
     : (isCleaner ? [currentUser.cleanerName] : []);
@@ -728,7 +742,6 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
       Object.entries(existingService.pagosPorCleaner).forEach(([k, v]) => { out[k] = String(v); });
       return out;
     }
-    // Backward compat: legacy pagoCleaner divided evenly among existing cleaners
     if (existingService?.pagoCleaner != null && initialCleaners.length > 0) {
       const share = Number(existingService.pagoCleaner) / initialCleaners.length;
       const out = {};
@@ -737,10 +750,28 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
     }
     return {};
   };
+  const initialRates = () => {
+    if (existingService?.ratesPorCleaner) {
+      const out = {};
+      Object.entries(existingService.ratesPorCleaner).forEach(([k, v]) => { out[k] = String(v); });
+      return out;
+    }
+    // Backward compat: derivar rate de pago/horas si existe
+    if (existingService?.pagosPorCleaner && existingService?.horas) {
+      const out = {};
+      Object.entries(existingService.pagosPorCleaner).forEach(([k, v]) => {
+        out[k] = String((Number(v) / Number(existingService.horas)).toFixed(2));
+      });
+      return out;
+    }
+    return {};
+  };
   const [pagosPorCleaner, setPagosPorCleaner] = useState(initialPagos());
+  const [ratesPorCleaner, setRatesPorCleaner] = useState(initialRates());
   const [pagosEditedManually, setPagosEditedManually] = useState({});
   const [tip, setTip] = useState(existingService?.tip != null ? String(existingService.tip) : '');
-  const [capturista, setCapturista] = useState(existingService?.capturista || (isCleaner ? currentUser.cleanerName : ''));
+  const [pagoCleaningTeam, setPagoCleaningTeam] = useState(existingService?.pagoCleaningTeam != null ? String(existingService.pagoCleaningTeam) : '');
+  const [capturista, setCapturista] = useState(existingService?.capturista || (isCleaner ? currentUser.cleanerName : (!canSeeCobro ? (currentUser?.displayName || '') : '')));
 
   // Cobro y pago al cleaner son opcionales para todos (admin y cleaner).
   const canSave = isCleaner
@@ -758,25 +789,71 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
   function bumpHours(delta) { setTimeMinutes(totalMinutes + delta * 60); }
   function bumpMinutes(delta) { setTimeMinutes(totalMinutes + delta * 15); }
 
-  // Auto-cálculo del pago para cada cleaner seleccionado.
-  // Solo aplica si el usuario no editó manualmente ese cleaner.
-  // Cuando se agrega/quita un cleaner o cambian horas/tipo, se recalcula.
+  // Al cambiar la lista de cleaners: inicializa rates y pagos para los nuevos según tarifa global.
   useEffect(() => {
-    if (isCleaner || !rates) return;
-    const suggested = calcSuggestedPay(rates, tipo, horas);
-    const next = {};
+    if (isCleaner || !canSeePagos) return;
+    const globalRate = rates?.[tipo];
+    const defaultHourlyRate = globalRate?.mode === 'hourly' ? String(globalRate.amount) : '';
+    const defaultFlatPago = globalRate?.mode === 'flat' ? String(globalRate.amount) : '';
+
+    const nextRates = { ...ratesPorCleaner };
+    const nextPagos = { ...pagosPorCleaner };
+
     cleaners.forEach((cl) => {
-      if (pagosEditedManually[cl] && pagosPorCleaner[cl] != null) {
-        next[cl] = pagosPorCleaner[cl]; // preserva edición manual
-      } else {
-        next[cl] = suggested ? String(suggested) : '';
+      // Solo inicializar si aún no tiene rate NI pago (cleaner nuevo)
+      if (nextRates[cl] == null && nextPagos[cl] == null) {
+        if (defaultHourlyRate) {
+          nextRates[cl] = defaultHourlyRate;
+          nextPagos[cl] = String(Number(defaultHourlyRate) * (Number(horas) || 0));
+        } else if (defaultFlatPago) {
+          nextPagos[cl] = defaultFlatPago;
+          nextRates[cl] = horas > 0 ? String((Number(defaultFlatPago) / Number(horas)).toFixed(2)) : '';
+        }
       }
     });
-    setPagosPorCleaner(next);
-  }, [tipo, horas, rates, cleaners.join('|')]);
 
+    // Quitar rates/pagos de cleaners que ya no están seleccionadas
+    Object.keys(nextRates).forEach((cl) => { if (!cleaners.includes(cl)) delete nextRates[cl]; });
+    Object.keys(nextPagos).forEach((cl) => { if (!cleaners.includes(cl)) delete nextPagos[cl]; });
+
+    setRatesPorCleaner(nextRates);
+    setPagosPorCleaner(nextPagos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleaners.join('|'), tipo]);
+
+  // Al cambiar las horas: recalcular pagos según rates individuales (rates se mantienen).
+  useEffect(() => {
+    if (isCleaner || !canSeePagos) return;
+    const nextPagos = { ...pagosPorCleaner };
+    cleaners.forEach((cl) => {
+      const rate = parseFloat(ratesPorCleaner[cl]);
+      if (!isNaN(rate)) {
+        nextPagos[cl] = String(rate * (Number(horas) || 0));
+      }
+    });
+    setPagosPorCleaner(nextPagos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [horas]);
+
+  // Cambiar rate de un cleaner → recalcula su pago = rate × horas
+  function updateRateDe(cleaner, value) {
+    setRatesPorCleaner({ ...ratesPorCleaner, [cleaner]: value });
+    const rate = parseFloat(value);
+    if (!isNaN(rate)) {
+      setPagosPorCleaner({ ...pagosPorCleaner, [cleaner]: String(rate * (Number(horas) || 0)) });
+    } else {
+      setPagosPorCleaner({ ...pagosPorCleaner, [cleaner]: '' });
+    }
+    setPagosEditedManually({ ...pagosEditedManually, [cleaner]: true });
+  }
+
+  // Cambiar pago total de un cleaner → recalcula su rate = pago / horas
   function updatePagoDe(cleaner, value) {
     setPagosPorCleaner({ ...pagosPorCleaner, [cleaner]: value });
+    const pago = parseFloat(value);
+    if (!isNaN(pago) && horas > 0) {
+      setRatesPorCleaner({ ...ratesPorCleaner, [cleaner]: String((pago / Number(horas)).toFixed(2)) });
+    }
     setPagosEditedManually({ ...pagosEditedManually, [cleaner]: true });
   }
 
@@ -792,11 +869,17 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
     if (!canSave) return;
     // Construir pagosPorCleaner limpio (solo cleaners actuales, valores numéricos)
     const pagosClean = {};
+    const ratesClean = {};
     cleaners.forEach((cl) => {
       const v = pagosPorCleaner[cl];
       if (v !== undefined && v !== '' && v !== null) {
         const num = parseFloat(v);
         if (!isNaN(num)) pagosClean[cl] = num;
+      }
+      const rv = ratesPorCleaner[cl];
+      if (rv !== undefined && rv !== '' && rv !== null) {
+        const rnum = parseFloat(rv);
+        if (!isNaN(rnum)) ratesClean[cl] = rnum;
       }
     });
     const totalPagoNum = Object.values(pagosClean).reduce((s, v) => s + v, 0);
@@ -806,10 +889,14 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
       cleaners,
       cleaner: cleaners[0] || '',
       horas: Number(horas), tipo,
-      cobro: cobro === '' ? null : parseFloat(cobro) || 0,
-      pagoCleaner: totalPagoNum || null, // suma total, para compat con vistas viejas
-      pagosPorCleaner: Object.keys(pagosClean).length ? pagosClean : null,
-      tip: tip === '' ? null : parseFloat(tip) || 0,
+      // Cobro al cliente: solo full admin edita; FerCastil preserva lo existente.
+      cobro: canSeeCobro ? (cobro === '' ? null : parseFloat(cobro) || 0) : (existingService?.cobro ?? null),
+      // Pagos (cleaning team, per cleaner, rates, tip): FerCastil también edita.
+      pagoCleaner: canSeePagos ? (totalPagoNum || null) : (existingService?.pagoCleaner ?? null),
+      pagosPorCleaner: canSeePagos ? (Object.keys(pagosClean).length ? pagosClean : null) : (existingService?.pagosPorCleaner ?? null),
+      ratesPorCleaner: canSeePagos ? (Object.keys(ratesClean).length ? ratesClean : null) : (existingService?.ratesPorCleaner ?? null),
+      pagoCleaningTeam: canSeePagos ? (pagoCleaningTeam === '' ? null : parseFloat(pagoCleaningTeam) || 0) : (existingService?.pagoCleaningTeam ?? null),
+      tip: canSeePagos ? (tip === '' ? null : parseFloat(tip) || 0) : (existingService?.tip ?? null),
       capturista,
     };
     if (isEditing) onUpdate(payload);
@@ -905,51 +992,80 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
           </div>
         )}
         {field('Tipo de servicio', <div className="flex gap-2">{TYPES.map((t) => pillButton(t, tipo, setTipo))}</div>)}
-        {field('Cobro al cliente (opcional)',
+        {canSeeCobro && field('Cobro al cliente (opcional)',
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
             <input type="number" inputMode="decimal" value={cobro} onChange={(e) => setCobro(e.target.value)} placeholder="Puedes dejarlo en blanco" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
           </div>
         )}
-        {!isCleaner && cleaners.length > 0 && field(
-          <span className="flex items-center gap-1.5">Pagos individuales <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
+        {canSeePagos && field(
+          <span className="flex items-center gap-1.5">Pago a cleaning team (opcional) <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
+            <input type="number" inputMode="decimal" value={pagoCleaningTeam} onChange={(e) => setPagoCleaningTeam(e.target.value)} placeholder="Pago grupal / de equipo" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+          </div>
+        )}
+        {canSeePagos && cleaners.length > 0 && field(
+          <span className="flex items-center gap-1.5">Pago a cleaner <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
           <div className="rounded-2xl p-3" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
             {cleaners.map((cl, idx) => (
-              <div key={cl} className={`flex items-center gap-3 ${idx > 0 ? 'mt-2' : ''}`}>
-                <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
-                  <span className="text-[10px] font-bold" style={{ color: c.apricot }}>{initialsOf(cl)}</span>
+              <div key={cl} className={idx > 0 ? 'mt-3 pt-3' : ''} style={idx > 0 ? { borderTop: `1px solid ${c.divider}` } : {}}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
+                    <span className="text-[10px] font-bold" style={{ color: c.apricot }}>{initialsOf(cl)}</span>
+                  </div>
+                  <div className="text-sm font-semibold flex-1" style={{ color: c.navy }}>{cl}</div>
                 </div>
-                <div className="text-sm flex-1" style={{ color: c.navy }}>{cl}</div>
-                <div className="relative flex-shrink-0" style={{ width: 110 }}>
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: c.graytext }}>$</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={pagosPorCleaner[cl] || ''}
-                    onChange={(e) => updatePagoDe(cl, e.target.value)}
-                    placeholder="0"
-                    className="w-full pl-7 pr-2 py-2 rounded-xl outline-none text-right"
-                    style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 14 }}
-                  />
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <div className="text-[9px] tracking-wider font-semibold uppercase mb-1" style={{ color: c.graytext }}>Por hora</div>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: c.graytext }}>$</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={ratesPorCleaner[cl] || ''}
+                        onChange={(e) => updateRateDe(cl, e.target.value)}
+                        placeholder="0"
+                        className="w-full pl-6 pr-2 py-2 rounded-xl outline-none text-right"
+                        style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[9px] tracking-wider font-semibold uppercase mb-1" style={{ color: c.graytext }}>Total</div>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: c.graytext }}>$</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={pagosPorCleaner[cl] || ''}
+                        onChange={(e) => updatePagoDe(cl, e.target.value)}
+                        placeholder="0"
+                        className="w-full pl-6 pr-2 py-2 rounded-xl outline-none text-right"
+                        style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 13, fontWeight: 600 }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
             {cleaners.length > 1 && (
               <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: `1px solid ${c.divider}` }}>
-                <span className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.graytext }}>Total</span>
+                <span className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.graytext }}>Total pago</span>
                 <span className="text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>{fmtMoney(totalPago)}</span>
               </div>
             )}
           </div>
         )}
-        {!isCleaner && field(
+        {canSeePagos && field(
           <span className="flex items-center gap-1.5">Tip a la cleaner (opcional) <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
             <input type="number" inputMode="decimal" value={tip} onChange={(e) => setTip(e.target.value)} placeholder="Si el cliente le dio propina" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
           </div>
         )}
-        {!isCleaner && field('Capturado por', <div className="flex gap-2 flex-wrap">{CAPTURISTAS.map((p) => pillButton(p, capturista, setCapturista))}</div>)}
+        {canSeeCobro && field('Capturado por', <div className="flex gap-2 flex-wrap">{CAPTURISTAS.map((p) => pillButton(p, capturista, setCapturista))}</div>)}
         <button onClick={handleSave} disabled={!canSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide mt-2 transition-all"
           style={{ background: canSave ? c.charcoal : c.divider, color: canSave ? c.paper : c.graytext, opacity: canSave ? 1 : 0.6 }}>
           {isEditing ? 'GUARDAR CAMBIOS' : 'GUARDAR SERVICIO'}
@@ -965,8 +1081,11 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
   const totalSvcs = monthSvcs.length;
   const totalHrs = monthSvcs.reduce((sum, s) => sum + (s.horas || 0), 0);
   const totalRev = monthSvcs.reduce((sum, s) => sum + (s.cobro || 0), 0);
-  const totalPaid = monthSvcs.reduce((sum, s) => sum + getTotalPago(s), 0);
+  const totalPaid = monthSvcs.reduce((sum, s) => sum + getTotalPago(s) + (Number(s.pagoCleaningTeam) || 0), 0);
   const ticket = totalSvcs ? totalRev / totalSvcs : 0;
+  const uniqueCleaners = new Set();
+  monthSvcs.forEach((s) => cleanersOf(s).forEach((cl) => uniqueCleaners.add(cl)));
+  const uniqueUnits = new Set(monthSvcs.map((s) => s.unidad)).size;
   const recent = [...services].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).slice(0, 4);
 
   return (
@@ -977,11 +1096,21 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
         <div className="grid grid-cols-2 gap-3 mb-6">
           <KPI label="Servicios" value={totalSvcs} sub="este mes" accent={c.gold} icon={Sparkles} />
           <KPI label="Horas" value={totalHrs.toFixed(2).replace(/\.?0+$/, '')} sub="trabajadas" accent={c.sage} icon={Clock} />
-          <KPI label="Ingresos" value={fmtMoney(totalRev)} sub="cobro clientes" accent={c.blushDeep} icon={DollarSign} />
-          {currentUser?.role === 'admin' ? (
-            <KPI label="Utilidad" value={fmtMoney(totalRev - totalPaid)} sub={`pagos: ${fmtMoney(totalPaid)}`} accent={c.terra} icon={TrendingUp} />
+          {hasFullAccess(currentUser) ? (
+            <>
+              <KPI label="Ingresos" value={fmtMoney(totalRev)} sub="cobro clientes" accent={c.blushDeep} icon={DollarSign} />
+              <KPI label="Utilidad" value={fmtMoney(totalRev - totalPaid)} sub={`pagos: ${fmtMoney(totalPaid)}`} accent={c.terra} icon={TrendingUp} />
+            </>
+          ) : canManagePagos(currentUser) ? (
+            <>
+              <KPI label="Pagos" value={fmtMoney(totalPaid)} sub="a cleaners / team" accent={c.blushDeep} icon={DollarSign} />
+              <KPI label="Cleaners" value={uniqueCleaners.size} sub="activas este mes" accent={c.terra} icon={User} />
+            </>
           ) : (
-            <KPI label="Ticket prom." value={fmtMoney(ticket)} sub="por servicio" accent={c.terra} icon={TrendingUp} />
+            <>
+              <KPI label="Cleaners" value={uniqueCleaners.size} sub="activas este mes" accent={c.blushDeep} icon={User} />
+              <KPI label="Unidades" value={uniqueUnits} sub="atendidas" accent={c.terra} icon={Building2} />
+            </>
           )}
         </div>
         <div className="flex items-center justify-between mb-3 mt-2">
@@ -999,7 +1128,7 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
             <div className="text-xs" style={{ color: c.graytext }}>Toca el botón + para registrar el primero</div>
           </div>
         ) : (
-          recent.map((s) => <ServiceCard key={s.id} svc={s} isAdmin={currentUser?.role === 'admin'} />)
+          recent.map((s) => <ServiceCard key={s.id} svc={s} isAdmin={currentUser?.role === 'admin'} canSeeCobro={hasFullAccess(currentUser)} canSeePagos={canManagePagos(currentUser)} />)
         )}
       </div>
     </div>
@@ -1008,6 +1137,8 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
 
 function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
   const isCleaner = currentUser?.role === 'cleaner';
+  const canSeeCobro = hasFullAccess(currentUser);
+  const canSeePagos = canManagePagos(currentUser);
   const [filter, setFilter] = useState('todos');
   const [filterCleaner, setFilterCleaner] = useState('todas');
   const [filterCap, setFilterCap] = useState('todos');
@@ -1055,7 +1186,7 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
         {list.length === 0 ? (
           <div className="rounded-2xl p-8 text-center" style={{ background: c.paper }}><div className="text-sm" style={{ color: c.graytext }}>Nada aquí todavía</div></div>
         ) : (
-          list.map((s) => <ServiceCard key={s.id} svc={s} onDelete={onDelete} onEdit={onEdit} isAdmin={!isCleaner} />)
+          list.map((s) => <ServiceCard key={s.id} svc={s} onDelete={canSeeCobro ? onDelete : null} onEdit={onEdit} isAdmin={!isCleaner} canSeeCobro={canSeeCobro} canSeePagos={canSeePagos} />)
         )}
       </div>
     </div>
@@ -1066,6 +1197,8 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
   const monthKey = currentMonthKey();
   const monthSvcs = services.filter((s) => inMonth(s.fecha, monthKey));
   const isAdmin = currentUser?.role === 'admin';
+  const canSeeCobro = hasFullAccess(currentUser);  // Ingresos (cobro-based)
+  const canSeePagos = canManagePagos(currentUser); // Nómina (pagos-based)
   const [period, setPeriod] = useState('week');
   const range = getPeriodRange(period);
   const periodSvcs = services.filter((s) => inRange(s.fecha, range));
@@ -1105,7 +1238,7 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
       <div className="px-6 -mt-2">
         <div className="text-sm mb-5 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>{monthLabel(monthKey)}</div>
 
-        {isAdmin && (
+        {canSeePagos && (
           <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
             <div className="mb-3">
               <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.apricot }}>NÓMINA</div>
@@ -1179,7 +1312,7 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
           </div>
         )}
 
-        <ChartCard title="Ingresos por cleaner" subtitle="ESTE MES" empty={byCleaner.every((r) => r.ingresos === 0)}>
+        {canSeeCobro && <ChartCard title="Ingresos por cleaner" subtitle="ESTE MES" empty={byCleaner.every((r) => r.ingresos === 0)}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={byCleaner} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
               <XAxis type="number" hide />
@@ -1190,7 +1323,7 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
+        </ChartCard>}
         <ChartCard title="Horas trabajadas" subtitle="POR CLEANER" empty={byCleaner.every((r) => r.horas === 0)}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={byCleaner} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -1203,7 +1336,7 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
-        <ChartCard title="Ingresos por tipo" subtitle="DISTRIBUCIÓN" empty={byType.length === 0}>
+        {canSeeCobro && <ChartCard title="Ingresos por tipo" subtitle="DISTRIBUCIÓN" empty={byType.length === 0}>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie data={byType} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} style={{ fontSize: 11, fill: c.charcoal, fontWeight: 600 }}>
@@ -1212,7 +1345,7 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
               <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
             </PieChart>
           </ResponsiveContainer>
-        </ChartCard>
+        </ChartCard>}
         <ChartCard title="Servicios por unidad" subtitle="ACTIVIDAD" empty={byUnit.length === 0}>
           <ResponsiveContainer width="100%" height={Math.max(180, byUnit.length * 32)}>
             <BarChart data={byUnit} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
