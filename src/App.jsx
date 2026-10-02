@@ -154,7 +154,7 @@ const c = {
   terraLight: '#F4E1D6',
 };
 
-const CLEANERS = ['Jazz', 'Karen', 'Kary', 'Ruben', 'Mafer'];
+const CLEANERS = ['Jazz', 'Karen', 'Kary', 'Ruben', 'Mafer', 'Maria'];
 const UNITS = ['Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Larisse N',
                'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha', 'Max - Hamilton'];
 const HOURS = Array.from({ length: 25 }, (_, i) => 1 + i * 0.25);
