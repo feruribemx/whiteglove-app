@@ -1150,17 +1150,20 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
   const [filterCleaner, setFilterCleaner] = useState('todas');
   const [filterCap, setFilterCap] = useState('todos');
   const [filterMes, setFilterMes] = useState('todos');
+  const [filterUnidad, setFilterUnidad] = useState('todas');
 
   // Base: servicios visibles a este usuario (cleaner solo ve los suyos)
   const baseList = isCleaner
     ? services.filter((s) => cleanersOf(s).includes(currentUser.cleanerName))
     : services;
 
-  // Meses disponibles — extraídos de los servicios visibles, orden más reciente primero
+  // Meses y clientes disponibles — extraídos dinámicamente de los servicios visibles
   const availableMonths = [...new Set(baseList.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
+  const availableUnits = [...new Set(baseList.map((s) => s.unidad).filter(Boolean))].sort();
 
   let list = [...baseList].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   if (filterMes !== 'todos') list = list.filter((s) => (s.fecha || '').startsWith(filterMes));
+  if (filterUnidad !== 'todas') list = list.filter((s) => s.unidad === filterUnidad);
   if (filter !== 'todos') list = list.filter((s) => s.tipo === filter);
   if (!isCleaner && filterCleaner !== 'todas') list = list.filter((s) => cleanersOf(s).includes(filterCleaner));
   if (!isCleaner && filterCap !== 'todos') list = list.filter((s) => s.capturista === filterCap);
@@ -1180,6 +1183,11 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
           {chip('Todos', 'todos', filterMes, setFilterMes)}
           {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
+        </div>
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cliente</div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+          {chip('Todos', 'todas', filterUnidad, setFilterUnidad)}
+          {availableUnits.map((u) => chip(u, u, filterUnidad, setFilterUnidad))}
         </div>
         <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Tipo</div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
