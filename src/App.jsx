@@ -154,9 +154,10 @@ const c = {
   terraLight: '#F4E1D6',
 };
 
-const CLEANERS = ['Jazz', 'Karen', 'Kary', 'Ruben', 'Mafer', 'Maria'];
+const CLEANERS = ['Jazz', 'Karen', 'Kary', 'Ruben', 'Mafer', 'Maria', 'Nancy'];
 const UNITS = ['Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Larisse N',
-               'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha', 'Max - Hamilton'];
+               'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha', 'Max - Hamilton',
+               'Veradek', 'Abi', 'Kenny'];
 const HOURS = Array.from({ length: 25 }, (_, i) => 1 + i * 0.25);
 const TYPES = ['Limpieza', 'Extra Task'];
 const CAPTURISTAS = ['Fer Castil', 'Michelle Lopez', 'WhiteGlove'];
