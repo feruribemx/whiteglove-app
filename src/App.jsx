@@ -117,6 +117,42 @@ async function saveRates(rates) {
   if (error) console.error('save rates', error);
 }
 
+// ---------- Audit log ----------
+async function logAction(entry) {
+  const { error } = await supabase.from('audit_log').insert(entry);
+  if (error) console.error('audit log', error);
+}
+
+const svcSummary = (svc) => {
+  const cls = cleanersOf(svc).join(', ');
+  return `${svc.fecha} · ${svc.unidad} (${cls || 'sin cleaners'})`;
+};
+
+const diffService = (oldSvc, newSvc) => {
+  const changes = [];
+  const money = (v) => v != null && v !== '' && !isNaN(Number(v)) ? `$${Number(v).toFixed(0)}` : '—';
+  if (oldSvc.fecha !== newSvc.fecha) changes.push(`fecha ${oldSvc.fecha}→${newSvc.fecha}`);
+  if (oldSvc.unidad !== newSvc.unidad) changes.push(`cliente ${oldSvc.unidad}→${newSvc.unidad}`);
+  if (Number(oldSvc.horas) !== Number(newSvc.horas)) changes.push(`horas ${oldSvc.horas}h→${newSvc.horas}h`);
+  if (oldSvc.tipo !== newSvc.tipo) changes.push(`tipo ${oldSvc.tipo}→${newSvc.tipo}`);
+  if (Number(oldSvc.cobro || 0) !== Number(newSvc.cobro || 0)) changes.push(`cobro ${money(oldSvc.cobro)}→${money(newSvc.cobro)}`);
+  if (Number(oldSvc.pagoCleaningTeam || 0) !== Number(newSvc.pagoCleaningTeam || 0)) changes.push(`pago team ${money(oldSvc.pagoCleaningTeam)}→${money(newSvc.pagoCleaningTeam)}`);
+  if (Number(oldSvc.tip || 0) !== Number(newSvc.tip || 0)) changes.push(`tip ${money(oldSvc.tip)}→${money(newSvc.tip)}`);
+  const oldC = cleanersOf(oldSvc).join(',');
+  const newC = cleanersOf(newSvc).join(',');
+  if (oldC !== newC) changes.push(`cleaners [${oldC}]→[${newC}]`);
+  const oldP = oldSvc.pagosPorCleaner || {};
+  const newP = newSvc.pagosPorCleaner || {};
+  const allP = new Set([...Object.keys(oldP), ...Object.keys(newP)]);
+  allP.forEach((cl) => {
+    if (Number(oldP[cl] || 0) !== Number(newP[cl] || 0)) {
+      changes.push(`pago ${cl} ${money(oldP[cl])}→${money(newP[cl])}`);
+    }
+  });
+  if (oldSvc.capturista !== newSvc.capturista) changes.push(`capturista ${oldSvc.capturista||'—'}→${newSvc.capturista||'—'}`);
+  return changes;
+};
+
 async function seedStockStorage(items) {
   const rows = items.map((item) => ({
     id: item.id, categoria: item.cat, producto: item.prod,
@@ -277,6 +313,15 @@ const getTotalPago = (svc) => {
   return Number(svc.pagoCleaner) || 0;
 };
 
+// Costo real del servicio para el negocio:
+// Si hay pago a cleaning team, ese es el costo (los pagos individuales están incluidos ahí).
+// Si no hay, el costo son los pagos individuales a cleaners.
+const calcCostoServicio = (svc) => {
+  const team = Number(svc.pagoCleaningTeam) || 0;
+  if (team > 0) return team;
+  return getTotalPago(svc);
+};
+
 // Ganancia total de un cleaner en un servicio (pago + porción del tip)
 const getGananciaDeCleaner = (svc, cleaner) => {
   const pago = getPagoDeCleaner(svc, cleaner);
@@ -345,6 +390,85 @@ function BrandHeader() {
         </div>
       </div>
     </>
+  );
+}
+
+function HistorialModal({ onClose }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.from('audit_log').select('*').order('ts', { ascending: false }).limit(200);
+      if (!error) setLogs(data || []);
+      setLoading(false);
+    })();
+  }, []);
+
+  const relativeTime = (ts) => {
+    const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+    if (diff < 60) return 'hace un momento';
+    if (diff < 3600) return `hace ${Math.floor(diff / 60)} min`;
+    if (diff < 86400) return `hace ${Math.floor(diff / 3600)} h`;
+    if (diff < 86400 * 7) return `hace ${Math.floor(diff / 86400)} días`;
+    try { return new Date(ts).toLocaleDateString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch(e) { return ts; }
+  };
+
+  const actionBadge = (a) => {
+    if (a === 'created') return { icon: '+', color: c.sage, label: 'CREÓ' };
+    if (a === 'updated') return { icon: '✎', color: c.gold, label: 'EDITÓ' };
+    if (a === 'deleted') return { icon: '×', color: c.terra, label: 'ELIMINÓ' };
+    return { icon: '•', color: c.graytext, label: a.toUpperCase() };
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <ClipboardList size={12} style={{ color: c.apricot }} />
+              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>HISTORIAL</span>
+            </div>
+            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Modificaciones</h2>
+            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Últimos 200 cambios en la nube.</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
+            <X size={16} style={{ color: c.navy }} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="py-12 text-center text-sm" style={{ color: c.graytext }}>Cargando...</div>
+        ) : logs.length === 0 ? (
+          <div className="py-12 text-center text-sm" style={{ color: c.graytext }}>Aún no hay historial — los cambios futuros se irán guardando aquí.</div>
+        ) : (
+          <div>
+            {logs.map((log) => {
+              const badge = actionBadge(log.action);
+              return (
+                <div key={log.id} className="rounded-2xl p-3 mb-2" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold" style={{ background: badge.color, color: c.paper }}>
+                      {badge.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold" style={{ color: c.navy }}>{log.user_name}</span>
+                        <span className="text-[9px] font-bold tracking-wider" style={{ color: badge.color }}>{badge.label}</span>
+                        <span className="text-[10px]" style={{ color: c.graytext }}>· {relativeTime(log.ts)}</span>
+                      </div>
+                      <div className="text-xs mt-1" style={{ color: c.charcoal, wordBreak: 'break-word', lineHeight: 1.5 }}>{log.summary}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -569,7 +693,7 @@ function CleanerLogin({ onLogin, onBack }) {
   );
 }
 
-function UserMenu({ user, onLogout, onClose, onOpenSettings }) {
+function UserMenu({ user, onLogout, onClose, onOpenSettings, onOpenHistorial }) {
   const isAdmin = user.role === 'admin';
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
@@ -594,6 +718,15 @@ function UserMenu({ user, onLogout, onClose, onOpenSettings }) {
             <div className="text-xs" style={{ color: c.graytext }}>{isAdmin ? `@${user.username}` : 'Cleaner'}</div>
           </div>
         </div>
+        {hasFullAccess(user) && onOpenHistorial && (
+          <button
+            onClick={onOpenHistorial}
+            className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
+            style={{ background: c.cream, color: c.navy, border: `1px solid ${c.divider}` }}
+          >
+            <ClipboardList size={15} /> HISTORIAL DE CAMBIOS
+          </button>
+        )}
         {hasFullAccess(user) && onOpenSettings && (
           <button
             onClick={onOpenSettings}
@@ -672,8 +805,8 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin, canSeeCobro, canSeePagos 
     ? `${cleanersList.slice(0, 2).join(' + ')}${cleanersList.length > 2 ? ` +${cleanersList.length - 2}` : ''}`
     : (cleanersList[0] || '—');
   const totalPagoSvc = getTotalPago(svc);
-  const totalCost = totalPagoSvc + (Number(svc.pagoCleaningTeam) || 0);
-  const utilidad = svc.cobro != null ? svc.cobro - totalCost : null;
+  const costoReal = calcCostoServicio(svc);
+  const utilidad = svc.cobro != null ? svc.cobro - costoReal : null;
 
   return (
     <div className="rounded-2xl p-4 mb-3 flex items-center gap-3" style={{ background: c.paper, boxShadow: '0 1px 6px rgba(43,41,38,0.04)' }}>
@@ -1088,7 +1221,7 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
   const totalSvcs = monthSvcs.length;
   const totalHrs = monthSvcs.reduce((sum, s) => sum + (s.horas || 0), 0);
   const totalRev = monthSvcs.reduce((sum, s) => sum + (s.cobro || 0), 0);
-  const totalPaid = monthSvcs.reduce((sum, s) => sum + getTotalPago(s) + (Number(s.pagoCleaningTeam) || 0), 0);
+  const totalPaid = monthSvcs.reduce((sum, s) => sum + calcCostoServicio(s), 0);
   const ticket = totalSvcs ? totalRev / totalSvcs : 0;
   const uniqueCleaners = new Set();
   monthSvcs.forEach((s) => cleanersOf(s).forEach((cl) => uniqueCleaners.add(cl)));
@@ -1223,32 +1356,56 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
 }
 
 function GraficasTab({ services, currentUser, onOpenMenu }) {
-  const monthKey = currentMonthKey();
-  const monthSvcs = services.filter((s) => inMonth(s.fecha, monthKey));
   const isAdmin = currentUser?.role === 'admin';
-  const canSeeCobro = hasFullAccess(currentUser);  // Ingresos (cobro-based)
-  const canSeePagos = canManagePagos(currentUser); // Nómina (pagos-based)
-  const [period, setPeriod] = useState('week');
-  const range = getPeriodRange(period);
-  const periodSvcs = services.filter((s) => inRange(s.fecha, range));
-  const nomina = CLEANERS.map((cl) => {
-    const svcs = periodSvcs.filter((s) => cleanersOf(s).includes(cl));
+  const isCleaner = currentUser?.role === 'cleaner';
+  const canSeeCobro = hasFullAccess(currentUser);
+  const canSeePagos = canManagePagos(currentUser);
+  const [filterMes, setFilterMes] = useState(currentMonthKey());
+  const [filterCleanerG, setFilterCleanerG] = useState('todas');
+
+  // Base: cleaners solo ven lo suyo; admins todo
+  const baseList = isCleaner
+    ? services.filter((s) => cleanersOf(s).includes(currentUser.cleanerName))
+    : services;
+
+  // Meses disponibles dinámicos (incluye el actual aunque esté vacío)
+  const availableMonths = [...new Set(baseList.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
+  const curM = currentMonthKey();
+  if (!availableMonths.includes(curM)) availableMonths.unshift(curM);
+
+  // Aplica filtros
+  let monthSvcs = baseList.filter((s) => (s.fecha || '').startsWith(filterMes));
+  if (!isCleaner && filterCleanerG !== 'todas') {
+    monthSvcs = monthSvcs.filter((s) => cleanersOf(s).includes(filterCleanerG));
+  }
+
+  // Si el admin filtra por 1 cleaner, mostramos solo ese; si no, todos
+  const cleanersToShow = (!isCleaner && filterCleanerG !== 'todas') ? [filterCleanerG] : CLEANERS;
+
+  const nomina = cleanersToShow.map((cl) => {
+    const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
     const horas = svcs.reduce((sum, s) => sum + (s.horas || 0), 0);
     const ganancias = svcs.reduce((sum, s) => sum + getGananciaDeCleaner(s, cl), 0);
     return { name: cl, servicios: svcs.length, horas, ganancias };
   }).filter((r) => r.servicios > 0 || r.ganancias > 0);
-  const byCleaner = CLEANERS.map((cl) => {
+
+  const byCleaner = cleanersToShow.map((cl) => {
     const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
     return {
       name: cl,
-      // Ingresos: se divide entre los cleaners del servicio
       ingresos: svcs.reduce((sum, s) => sum + ((s.cobro || 0) / Math.max(1, cleanersOf(s).length)), 0),
-      // Horas: crédito completo a cada cleaner que trabajó
       horas: svcs.reduce((sum, s) => sum + (s.horas || 0), 0),
     };
   });
   const byUnit = UNITS.map((u) => ({ name: u, servicios: monthSvcs.filter((s) => s.unidad === u).length })).filter((r) => r.servicios > 0);
   const byType = TYPES.map((t) => ({ name: t, value: monthSvcs.filter((s) => s.tipo === t).reduce((sum, s) => sum + (s.cobro || 0), 0) })).filter((r) => r.value > 0);
+
+  const chip = (label, val, current, setter) => (
+    <button onClick={() => setter(val)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
+      style={{ background: current === val ? c.charcoal : c.paper, color: current === val ? c.paper : c.graytext, border: `1px solid ${current === val ? c.charcoal : c.divider}` }}>
+      {label}
+    </button>
+  );
   const PIE_COLORS = [c.gold, c.blushDeep];
 
   const ChartCard = ({ title, subtitle, children, empty }) => (
@@ -1264,8 +1421,23 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
   return (
     <div>
       <Header subtitle="Gráficas" currentUser={currentUser} onOpenMenu={onOpenMenu} />
-      <div className="px-6 -mt-2">
-        <div className="text-sm mb-5 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>{monthLabel(monthKey)}</div>
+      <div className="px-6 -mt-2 pb-4">
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes</div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+          {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
+        </div>
+        {!isCleaner && (
+          <>
+            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
+            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+              {chip('Todas', 'todas', filterCleanerG, setFilterCleanerG)}
+              {CLEANERS.map((cl) => chip(cl, cl, filterCleanerG, setFilterCleanerG))}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="px-6">
+        <div className="text-sm mb-4 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>{monthLabel(filterMes)}{filterCleanerG !== 'todas' ? ` · ${filterCleanerG}` : ''}</div>
 
         {canSeePagos && (
           <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
@@ -1274,33 +1446,8 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
               <h3 className="text-lg font-serif mt-0.5" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Ganancias por cleaner</h3>
             </div>
 
-            <div className="flex gap-2 mb-4">
-              {[
-                { id: 'week', label: 'Semana' },
-                { id: 'quincena', label: 'Quincena' },
-                { id: 'month', label: 'Mes' },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setPeriod(p.id)}
-                  className="flex-1 py-2 rounded-full text-xs font-semibold"
-                  style={{
-                    background: period === p.id ? c.navy : c.cream,
-                    color: period === p.id ? c.paper : c.graytext,
-                    border: `1px solid ${period === p.id ? c.navy : c.divider}`,
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="text-[11px] text-center mb-3 italic" style={{ color: c.graytext }}>
-              {periodLabel(period, range)}
-            </div>
-
             {nomina.length === 0 ? (
-              <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este período</div>
+              <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este mes</div>
             ) : (
               <>
                 <div className="flex items-center px-2 pb-2" style={{ borderBottom: `1px solid ${c.divider}` }}>
@@ -1642,6 +1789,7 @@ export default function App() {
   const [editingService, setEditingService] = useState(null);
   const [rates, setRates] = useState(DEFAULT_RATES);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistorial, setShowHistorial] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -1721,24 +1869,47 @@ export default function App() {
   }
 
   async function addService(svc) {
-    // Optimistic: show immediately, then sync
     setServices([svc, ...services]);
     setShowAdd(false);
     setTab('registro');
     const { error } = await supabase.from('services').insert(svcToDb(svc));
-    if (error) { console.error('insert service', error); alert('Error al guardar: ' + error.message); }
+    if (error) { console.error('insert service', error); alert('Error al guardar: ' + error.message); return; }
+    logAction({
+      user_name: currentUser?.displayName || currentUser?.username || 'desconocido',
+      action: 'created', entity: 'service', entity_id: String(svc.id),
+      summary: `Nuevo servicio · ${svcSummary(svc)}`,
+    });
   }
   async function updateService(updated) {
+    const oldSvc = services.find((s) => s.id === updated.id);
     setServices(services.map((s) => s.id === updated.id ? updated : s));
     setEditingService(null);
     setShowAdd(false);
     const { error } = await supabase.from('services').update(svcToDb(updated)).eq('id', updated.id);
-    if (error) { console.error('update service', error); alert('Error al actualizar: ' + error.message); }
+    if (error) { console.error('update service', error); alert('Error al actualizar: ' + error.message); return; }
+    if (oldSvc) {
+      const changes = diffService(oldSvc, updated);
+      if (changes.length > 0) {
+        logAction({
+          user_name: currentUser?.displayName || currentUser?.username || 'desconocido',
+          action: 'updated', entity: 'service', entity_id: String(updated.id),
+          summary: `Editó ${svcSummary(updated)} · ${changes.join('; ')}`,
+        });
+      }
+    }
   }
   async function deleteService(id) {
+    const oldSvc = services.find((s) => s.id === id);
     setServices(services.filter((s) => s.id !== id));
     const { error } = await supabase.from('services').delete().eq('id', id);
-    if (error) { console.error('delete service', error); }
+    if (error) { console.error('delete service', error); return; }
+    if (oldSvc) {
+      logAction({
+        user_name: currentUser?.displayName || currentUser?.username || 'desconocido',
+        action: 'deleted', entity: 'service', entity_id: String(id),
+        summary: `Eliminó · ${svcSummary(oldSvc)}`,
+      });
+    }
   }
   async function updateRates(nextRates) {
     setRates(nextRates);
@@ -1796,8 +1967,9 @@ export default function App() {
         {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         <BottomNav tab={activeTab} setTab={setTab} onAdd={() => setShowAdd(true)} isCleaner={isCleaner} />
         {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} rates={rates} />}
-        {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} onOpenSettings={() => { setShowUserMenu(false); setShowSettings(true); }} />}
+        {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} onOpenSettings={() => { setShowUserMenu(false); setShowSettings(true); }} onOpenHistorial={() => { setShowUserMenu(false); setShowHistorial(true); }} />}
         {showSettings && <SettingsModal initialRates={rates} onClose={() => setShowSettings(false)} onSave={updateRates} />}
+        {showHistorial && <HistorialModal onClose={() => setShowHistorial(false)} />}
       </div>
     </div>
   );
