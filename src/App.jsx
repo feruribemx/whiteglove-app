@@ -559,15 +559,23 @@ function SettingsModal({ initialRates, onClose, onSave }) {
 const LANDING_IMAGES = {
   hero: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1600&q=80&auto=format&fit=crop',
   about: 'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=1200&q=80&auto=format&fit=crop',
+  // CN Tower, Toronto
   toronto: 'https://images.unsplash.com/photo-1517935706615-2717063c2225?w=800&q=80&auto=format&fit=crop',
-  seattle: 'https://images.unsplash.com/photo-1502175353174-a7a44e84da72?w=800&q=80&auto=format&fit=crop',
-  guadalajara: 'https://images.unsplash.com/photo-1518638150340-f706e86654de?w=800&q=80&auto=format&fit=crop',
+  // Space Needle, Seattle
+  seattle: 'https://images.unsplash.com/photo-1438401171849-74ac270044ee?w=800&q=80&auto=format&fit=crop',
+  // Catedral de Guadalajara
+  guadalajara: 'https://images.unsplash.com/photo-1568402102990-bc541580b59f?w=800&q=80&auto=format&fit=crop',
   contact: 'https://images.unsplash.com/photo-1527515637462-cff94eecc1ac?w=1600&q=80&auto=format&fit=crop',
 };
+
+// WhatsApp del servicio al cliente de WhiteGlove
+const WHATSAPP_NUMBER = '14168840601';
+const whatsappLink = (msg) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
 
 const TRANSLATIONS = {
   es: {
     nav: { login: 'Iniciar sesión', langToggle: 'EN' },
+    whatsapp: { msg: '¡Hola! Me gustaría pedir una cotización para servicio de limpieza con WhiteGlove.' },
     hero: {
       tag: 'LIMPIEZA PROFESIONAL · CUIDADO EXCEPCIONAL',
       headline: 'Espacios excepcionales. Cuidado excepcional.',
@@ -672,6 +680,7 @@ const TRANSLATIONS = {
   },
   en: {
     nav: { login: 'Login', langToggle: 'ES' },
+    whatsapp: { msg: "Hi! I'd like to request a quote for cleaning services with WhiteGlove." },
     hero: {
       tag: 'PROFESSIONAL CLEANING · EXCEPTIONAL CARE',
       headline: 'Exceptional Spaces. Exceptional Care.',
@@ -2073,7 +2082,7 @@ function Landing({ lang, setLang, onLogin }) {
             {t('hero.subhead')}
           </p>
           <div className="text-xs md:text-sm text-white/70 italic mb-10">{t('hero.regions')}</div>
-          <a href="https://whitegloveps.square.site" target="_blank" rel="noopener noreferrer"
+          <a href={whatsappLink(t('whatsapp.msg'))} target="_blank" rel="noopener noreferrer"
             className="inline-block px-8 py-4 rounded-full text-xs md:text-sm font-bold tracking-wider"
             style={{ background: apricot, color: navy }}>
             {t('hero.cta')} →
@@ -2196,7 +2205,15 @@ function Landing({ lang, setLang, onLogin }) {
             { img: LANDING_IMAGES.guadalajara, data: T.areas.mexico, hasCity2: false },
           ].map((area, i) => (
             <div key={i} className="rounded-3xl overflow-hidden" style={{ background: paper, boxShadow: '0 8px 24px rgba(11,29,74,0.08)' }}>
-              <div style={{ height: 180, backgroundImage: `url(${area.img})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+              <div style={{ height: 180, position: 'relative', overflow: 'hidden', background: navy }}>
+                <img src={area.img} alt={area.data.country}
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(11,29,74,0.55), transparent 60%)' }} />
+                <div style={{ position: 'absolute', bottom: 10, left: 14, color: paper, fontFamily: "'Playfair Display', Georgia, serif", fontSize: 18, fontWeight: 500 }}>
+                  {area.data.country}
+                </div>
+              </div>
               <div className="p-6">
                 <h3 className="text-xl md:text-2xl font-serif mb-4" style={{ color: navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{area.data.country}</h3>
                 <div className="mb-3">
@@ -2261,7 +2278,7 @@ function Landing({ lang, setLang, onLogin }) {
           <h2 className="text-3xl md:text-5xl font-serif text-white mb-5" style={{ fontFamily: "'Playfair Display', Georgia, serif", lineHeight: 1.2, fontWeight: 500 }}>{t('contact.title')}</h2>
           <p className="text-base md:text-lg text-white/85 mb-8" style={{ lineHeight: 1.7 }}>{t('contact.subtitle')}</p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <a href="https://whitegloveps.square.site" target="_blank" rel="noopener noreferrer" className="inline-block px-7 py-3.5 rounded-full text-xs md:text-sm font-bold tracking-wider" style={{ background: apricot, color: navy }}>
+            <a href={whatsappLink(t('whatsapp.msg'))} target="_blank" rel="noopener noreferrer" className="inline-block px-7 py-3.5 rounded-full text-xs md:text-sm font-bold tracking-wider" style={{ background: apricot, color: navy }}>
               {t('contact.cta')} →
             </a>
             <a href="https://instagram.com/whitegloveps" target="_blank" rel="noopener noreferrer" className="inline-block px-7 py-3.5 rounded-full text-xs md:text-sm font-bold tracking-wider" style={{ background: 'transparent', color: paper, border: `1px solid ${paper}` }}>
@@ -2277,7 +2294,9 @@ function Landing({ lang, setLang, onLogin }) {
         <div className="max-w-6xl mx-auto px-5 md:px-8">
           <div className="grid md:grid-cols-2 gap-8 mb-8">
             <div>
-              <img src={LOGO_URI} alt="WhiteGlove" style={{ height: 40, marginBottom: 12, filter: 'brightness(0) invert(1)' }} />
+              <div className="inline-block rounded-2xl p-2 mb-3" style={{ background: paper }}>
+                <img src={LOGO_URI} alt="WhiteGlove" style={{ height: 36, display: 'block' }} />
+              </div>
               <p className="text-sm italic" style={{ color: apricot }}>{t('footer.tag')}</p>
             </div>
             <div className="text-sm space-y-1 md:text-right" style={{ color: 'rgba(255,255,255,0.8)' }}>
@@ -2312,7 +2331,7 @@ export default function App() {
   const [showHistorial, setShowHistorial] = useState(false);
   const [showLanding, setShowLanding] = useState(true);
   const [lang, setLang] = useState(() => {
-    try { const saved = localStorage.getItem('wg-lang'); return saved === 'en' ? 'en' : 'es'; } catch(e) { return 'es'; }
+    try { const saved = localStorage.getItem('wg-lang'); return saved === 'es' ? 'es' : 'en'; } catch(e) { return 'en'; }
   });
   // Guardar idioma preferido
   useEffect(() => { try { localStorage.setItem('wg-lang', lang); } catch(e) {} }, [lang]);
