@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Plus, Home, ClipboardList, BarChart3, Package, Trash2, X, Sparkles,
   Clock, DollarSign, TrendingUp, AlertCircle, CheckCircle2,
-  Minus, ChevronRight, Warehouse, Building2, Eye, EyeOff, LogOut, User, Shield, ArrowLeft
+  Minus, ChevronRight, ChevronLeft, Warehouse, Building2, Eye, EyeOff, LogOut, User, Shield, ShieldCheck, ArrowLeft
 } from 'lucide-react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip,
