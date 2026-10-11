@@ -117,6 +117,34 @@ async function saveRates(rates) {
   if (error) console.error('save rates', error);
 }
 
+async function fetchExtraClients() {
+  const { data, error } = await supabase.from('clients').select('*').order('name');
+  if (error) { console.error('fetch clients', error); return []; }
+  return (data || []).map((r) => r.name);
+}
+
+async function fetchCleanersDb() {
+  const { data, error } = await supabase.from('cleaners_db').select('*').order('name');
+  if (error) { console.error('fetch cleaners_db', error); return []; }
+  return data || [];
+}
+
+async function addClientToDb(name) {
+  const { error } = await supabase.from('clients').insert({ name });
+  if (error) throw error;
+  const rows = UNIT_STOCK_TEMPLATE.map((item, i) => ({
+    id: `${name}-${i}`, unidad: name,
+    categoria: item.cat, producto: item.prod, unidad_medida: item.unit,
+    qty: item.qty, min_qty: item.min,
+  }));
+  await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
+}
+
+async function addCleanerToDb(name, password) {
+  const { error } = await supabase.from('cleaners_db').insert({ name, password });
+  if (error) throw error;
+}
+
 // ---------- Audit log ----------
 async function logAction(entry) {
   const { error } = await supabase.from('audit_log').insert(entry);
@@ -193,7 +221,7 @@ const c = {
 const CLEANERS = ['Jazz', 'Karen', 'Kary', 'Ruben', 'Mafer', 'Maria', 'Nancy'];
 const UNITS = ['Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Larisse N',
                'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha', 'Max - Hamilton',
-               'Veradek', 'Abi', 'Kenny'];
+               'Veradek', 'Abi', 'KENNY SPADINA', 'Georgia Ancaster'];
 const HOURS = Array.from({ length: 25 }, (_, i) => 1 + i * 0.25);
 const TYPES = ['Limpieza', 'Extra Task'];
 const CAPTURISTAS = ['Fer Castil', 'Michelle Lopez', 'WhiteGlove'];
@@ -472,6 +500,90 @@ function HistorialModal({ onClose }) {
   );
 }
 
+function AddClientModal({ onClose, onSave, existingClients }) {
+  const [name, setName] = useState('');
+  const trimmed = name.trim();
+  const alreadyExists = existingClients.some((cc) => cc.toLowerCase() === trimmed.toLowerCase());
+  const canSave = trimmed.length > 0 && !alreadyExists;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Building2 size={12} style={{ color: c.apricot }} />
+              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>NUEVO CLIENTE</span>
+            </div>
+            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Agregar cliente</h2>
+            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Se sincroniza en la nube para todos los administradores.</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
+            <X size={16} style={{ color: c.navy }} />
+          </button>
+        </div>
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Nombre del cliente / unidad</div>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Tomas Downtown" autoFocus
+            className="w-full px-4 py-3 rounded-2xl outline-none" style={{ background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
+          {alreadyExists && <div className="text-xs mt-2" style={{ color: c.terra }}>Este cliente ya existe.</div>}
+        </div>
+        <button onClick={() => { onSave(trimmed); onClose(); }} disabled={!canSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide"
+          style={{ background: canSave ? c.navy : c.divider, color: canSave ? c.paper : c.graytext }}>
+          GUARDAR CLIENTE
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AddCleanerModal({ onClose, onSave, existingCleaners }) {
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const trimmedName = name.trim();
+  const trimmedPass = password.trim();
+  const alreadyExists = existingCleaners.some((cc) => cc.toLowerCase() === trimmedName.toLowerCase());
+  const canSave = trimmedName.length > 0 && trimmedPass.length >= 3 && !alreadyExists;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <User size={12} style={{ color: c.apricot }} />
+              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>NUEVA CLEANER</span>
+            </div>
+            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Agregar cleaner</h2>
+            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Se registra con contraseña básica para su login.</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
+            <X size={16} style={{ color: c.navy }} />
+          </button>
+        </div>
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Nombre</div>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Lucia" autoFocus
+            className="w-full px-4 py-3 rounded-2xl outline-none" style={{ background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
+          {alreadyExists && <div className="text-xs mt-2" style={{ color: c.terra }}>Esta cleaner ya existe.</div>}
+        </div>
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Contraseña (mín. 3 caracteres)</div>
+          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Ej: lucia123"
+            className="w-full px-4 py-3 rounded-2xl outline-none" style={{ background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
+          <div className="text-[11px] mt-2" style={{ color: c.graytext }}>Comparte esta contraseña con la cleaner para su login.</div>
+        </div>
+        <button onClick={() => { onSave(trimmedName, trimmedPass); onClose(); }} disabled={!canSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide"
+          style={{ background: canSave ? c.navy : c.divider, color: canSave ? c.paper : c.graytext }}>
+          GUARDAR CLEANER
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SettingsModal({ initialRates, onClose, onSave }) {
   const [rates, setRates] = useState(initialRates || DEFAULT_RATES);
 
@@ -552,6 +664,16 @@ function SettingsModal({ initialRates, onClose, onSave }) {
     </div>
   );
 }
+
+
+const REVIEWS = [
+  { name: 'Alexei', location: 'Toronto, ON', text_en: 'WhiteGlove transformed my Airbnb turnovers. My guests consistently mention how spotless the space feels. The attention to detail is unmatched.', text_es: 'WhiteGlove transformó mis turnovers de Airbnb. Mis huéspedes constantemente mencionan lo impecable que se siente el espacio. La atención al detalle es inigualable.', rating: 5 },
+  { name: 'Mandy D.', location: 'Markham, ON', text_en: 'Reliable, professional, and detail-oriented. I never worry about my property between bookings — WhiteGlove has it covered.', text_es: 'Confiables, profesionales y meticulosos. Nunca me preocupo por mi propiedad entre reservas — WhiteGlove lo tiene todo bajo control.', rating: 5 },
+  { name: 'Rohan', location: 'Downtown Toronto', text_en: 'The team manages all three of my units with incredible consistency. Communication is clear, service is impeccable.', text_es: 'El equipo maneja mis tres unidades con una consistencia increíble. La comunicación es clara y el servicio impecable.', rating: 5 },
+  { name: 'Saadman', location: 'Mississauga, ON', text_en: 'Deep clean service was outstanding. Found that premium touch other companies promise but never deliver.', text_es: 'El servicio de limpieza profunda fue excepcional. Encontré ese toque premium que otras compañías prometen pero nunca entregan.', rating: 5 },
+  { name: 'Max', location: 'Hamilton, ON', text_en: 'Been working with WhiteGlove for months. Their checklists and property reports make managing from a distance effortless.', text_es: 'He trabajado con WhiteGlove por meses. Sus checklists y reportes de propiedad hacen que administrar a distancia sea sencillo.', rating: 5 },
+  { name: 'Larisse', location: 'Yorkville, Toronto', text_en: 'Michelle and her team are incredible. They treat my home like it was their own. Highly recommend.', text_es: 'Michelle y su equipo son increíbles. Tratan mi casa como si fuera suya. Altamente recomendados.', rating: 5 },
+];
 
 // ===== LANDING PAGE DATA =====
 
@@ -661,6 +783,11 @@ const TRANSLATIONS = {
         { num: '4', title: 'Disfruta la experiencia', desc: 'Nuestro equipo se encarga de los detalles mientras tú disfrutas la tranquilidad.' },
       ],
     },
+    testimonials: {
+      overline: 'Lo que dicen de nosotros',
+      title: 'Historias que nos enorgullecen',
+      subtitle: 'La confianza se construye un espacio a la vez. Esto es lo que nuestros clientes dicen de WhiteGlove.',
+    },
     contact: {
       overline: 'Contacto',
       title: 'Tu espacio merece el toque WhiteGlove.',
@@ -765,6 +892,11 @@ const TRANSLATIONS = {
         { num: '3', title: 'Schedule Your Service', desc: 'Choose a convenient date and time based on availability.' },
         { num: '4', title: 'Enjoy the Experience', desc: 'Our team takes care of the details while you enjoy peace of mind.' },
       ],
+    },
+    testimonials: {
+      overline: 'What they say about us',
+      title: 'Stories that make us proud',
+      subtitle: "Trust is built one space at a time. Here's what our clients say about WhiteGlove.",
     },
     contact: {
       overline: 'Contact',
@@ -904,7 +1036,64 @@ function AdminLogin({ onLogin, onBack }) {
   );
 }
 
-function CleanerLogin({ onLogin, onBack }) {
+function CleanerLogin({ onLogin, onBack, cleanersDb = [], allCleaners: allCleanersProp }) {
+  const CLEANERS_LIST = (allCleanersProp && allCleanersProp.length) ? allCleanersProp : CLEANERS;
+  const [pendingCleaner, setPendingCleaner] = useState(null);
+  const [passInput, setPassInput] = useState('');
+  const [passError, setPassError] = useState('');
+
+  function tryLoginWithPass() {
+    const record = cleanersDb.find((cc) => cc.name === pendingCleaner);
+    if (record && (passInput || '').trim().toLowerCase() === (record.password || '').toLowerCase()) {
+      onLogin({ role: 'cleaner', cleanerName: pendingCleaner, displayName: pendingCleaner });
+    } else {
+      setPassError('Contraseña incorrecta');
+    }
+  }
+
+  function handleCleanerPick(name) {
+    const record = cleanersDb.find((cc) => cc.name === name);
+    if (record && record.password) {
+      setPendingCleaner(name);
+      setPassInput('');
+      setPassError('');
+    } else {
+      // Legacy cleaner without password → login directly
+      onLogin({ role: 'cleaner', cleanerName: name, displayName: name });
+    }
+  }
+
+  // Password entry screen
+  if (pendingCleaner) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: c.cream }}>
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: c.apricot }}>
+              <User size={28} style={{ color: c.navy }} />
+            </div>
+            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Hola, {pendingCleaner}</h2>
+            <p className="text-sm italic mt-1" style={{ color: c.graytext }}>Ingresa tu contraseña</p>
+          </div>
+          <input type="password" value={passInput} onChange={(e) => { setPassInput(e.target.value); setPassError(''); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') tryLoginWithPass(); }}
+            placeholder="Contraseña" autoFocus
+            className="w-full px-4 py-3 rounded-2xl outline-none mb-3"
+            style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
+          {passError && <div className="text-xs mb-3 text-center" style={{ color: c.terra }}>{passError}</div>}
+          <button onClick={tryLoginWithPass} className="w-full py-3 rounded-2xl font-semibold text-sm tracking-wider mb-2"
+            style={{ background: c.navy, color: c.paper }}>
+            ENTRAR
+          </button>
+          <button onClick={() => setPendingCleaner(null)} className="w-full py-3 rounded-2xl font-semibold text-xs tracking-wider"
+            style={{ background: 'transparent', color: c.graytext }}>
+            ← Cambiar cleaner
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full flex items-center justify-center px-6 py-8" style={{ background: c.cream }}>
       <div className="w-full max-w-sm">
@@ -916,10 +1105,10 @@ function CleanerLogin({ onLogin, onBack }) {
           <h1 className="text-3xl font-serif mb-2" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>¿Quién eres?</h1>
           <p className="text-sm italic" style={{ color: c.graytext }}>Toca tu nombre para entrar</p>
         </div>
-        {CLEANERS.map((name) => (
+        {CLEANERS_LIST.map((name) => (
           <button
             key={name}
-            onClick={() => onLogin({ role: 'cleaner', cleanerName: name, displayName: name })}
+            onClick={() => handleCleanerPick(name)}
             className="w-full rounded-3xl p-4 mb-3 flex items-center gap-4 transition-all"
             style={{ background: c.paper, boxShadow: '0 4px 24px rgba(11,29,74,0.06)' }}
           >
@@ -938,7 +1127,7 @@ function CleanerLogin({ onLogin, onBack }) {
   );
 }
 
-function UserMenu({ user, onLogout, onClose, onOpenSettings, onOpenHistorial }) {
+function UserMenu({ user, onLogout, onClose, onOpenSettings, onOpenHistorial, onOpenAddClient, onOpenAddCleaner }) {
   const isAdmin = user.role === 'admin';
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
@@ -963,6 +1152,18 @@ function UserMenu({ user, onLogout, onClose, onOpenSettings, onOpenHistorial }) 
             <div className="text-xs" style={{ color: c.graytext }}>{isAdmin ? `@${user.username}` : 'Cleaner'}</div>
           </div>
         </div>
+        {hasFullAccess(user) && onOpenAddClient && (
+          <button onClick={onOpenAddClient} className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
+            style={{ background: c.cream, color: c.navy, border: `1px solid ${c.divider}` }}>
+            <Building2 size={15} /> AGREGAR CLIENTE
+          </button>
+        )}
+        {hasFullAccess(user) && onOpenAddCleaner && (
+          <button onClick={onOpenAddCleaner} className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
+            style={{ background: c.cream, color: c.navy, border: `1px solid ${c.divider}` }}>
+            <User size={15} /> AGREGAR CLEANER
+          </button>
+        )}
         {hasFullAccess(user) && onOpenHistorial && (
           <button
             onClick={onOpenHistorial}
@@ -1106,7 +1307,9 @@ function ServiceCard({ svc, onDelete, onEdit, isAdmin, canSeeCobro, canSeePagos 
   );
 }
 
-function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingService, rates }) {
+function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingService, rates, unitsList, cleanersList }) {
+  const UNITS_TO_USE = unitsList && unitsList.length ? unitsList : UNITS;
+  const CLEANERS_TO_USE = cleanersList && cleanersList.length ? cleanersList : CLEANERS;
   const isCleaner = currentUser?.role === 'cleaner';
   const isEditing = !!existingService;
   const canSeeCobro = hasFullAccess(currentUser);     // Solo Fernandouribe + Michelle
@@ -1520,7 +1723,8 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
   );
 }
 
-function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
+function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu, allCleaners: allCleanersProp }) {
+  const allCleaners = allCleanersProp || CLEANERS;
   const isCleaner = currentUser?.role === 'cleaner';
   const canSeeCobro = hasFullAccess(currentUser);
   const canSeePagos = canManagePagos(currentUser);
@@ -1600,7 +1804,8 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu }) {
   );
 }
 
-function GraficasTab({ services, currentUser, onOpenMenu }) {
+function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleanersProp }) {
+  const allCleanersG = allCleanersProp || CLEANERS;
   const isAdmin = currentUser?.role === 'admin';
   const isCleaner = currentUser?.role === 'cleaner';
   const canSeeCobro = hasFullAccess(currentUser);
@@ -1625,7 +1830,7 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
   }
 
   // Si el admin filtra por 1 cleaner, mostramos solo ese; si no, todos
-  const cleanersToShow = (!isCleaner && filterCleanerG !== 'todas') ? [filterCleanerG] : CLEANERS;
+  const cleanersToShow = (!isCleaner && filterCleanerG !== 'todas') ? [filterCleanerG] : allCleanersG;
 
   const nomina = cleanersToShow.map((cl) => {
     const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
@@ -1676,7 +1881,7 @@ function GraficasTab({ services, currentUser, onOpenMenu }) {
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
             <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
               {chip('Todas', 'todas', filterCleanerG, setFilterCleanerG)}
-              {CLEANERS.map((cl) => chip(cl, cl, filterCleanerG, setFilterCleanerG))}
+              {allCleanersG.map((cl) => chip(cl, cl, filterCleanerG, setFilterCleanerG))}
             </div>
           </>
         )}
@@ -2269,6 +2474,38 @@ function Landing({ lang, setLang, onLogin }) {
         </div>
       </Section>
 
+      {/* TESTIMONIALS */}
+      <Section bg={paper}>
+        <div className="text-center mb-12">
+          <Overline>{t('testimonials.overline')}</Overline>
+          <Title>{t('testimonials.title')}</Title>
+          <p className="text-base md:text-lg max-w-2xl mx-auto" style={{ color: graytext, lineHeight: 1.7 }}>{t('testimonials.subtitle')}</p>
+        </div>
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {REVIEWS.map((r, i) => (
+            <div key={i} className="rounded-3xl p-6 md:p-7 flex flex-col" style={{ background: cream, border: `1px solid ${divider}` }}>
+              <div className="flex gap-1 mb-4">
+                {[...Array(r.rating)].map((_, s) => (
+                  <span key={s} style={{ color: apricot, fontSize: 16 }}>★</span>
+                ))}
+              </div>
+              <p className="text-sm md:text-base italic mb-5 flex-1" style={{ color: charcoal, lineHeight: 1.7 }}>
+                "{lang === 'es' ? r.text_es : r.text_en}"
+              </p>
+              <div className="flex items-center gap-3 pt-4" style={{ borderTop: `1px solid ${divider}` }}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: navy, color: apricot, fontWeight: 'bold', fontSize: 13 }}>
+                  {r.name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
+                </div>
+                <div>
+                  <div className="text-sm font-semibold" style={{ color: navy }}>{r.name}</div>
+                  <div className="text-xs" style={{ color: graytext }}>{r.location}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
       {/* CONTACT */}
       <section className="relative overflow-hidden py-20 md:py-32">
         <div className="absolute inset-0" style={{ backgroundImage: `url(${LANDING_IMAGES.contact})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
@@ -2329,6 +2566,10 @@ export default function App() {
   const [rates, setRates] = useState(DEFAULT_RATES);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistorial, setShowHistorial] = useState(false);
+  const [showAddClient, setShowAddClient] = useState(false);
+  const [showAddCleaner, setShowAddCleaner] = useState(false);
+  const [extraClients, setExtraClients] = useState([]);
+  const [cleanersDb, setCleanersDb] = useState([]);
   const [showLanding, setShowLanding] = useState(true);
   const [lang, setLang] = useState(() => {
     try { const saved = localStorage.getItem('wg-lang'); return saved === 'es' ? 'es' : 'en'; } catch(e) { return 'en'; }
@@ -2354,13 +2595,17 @@ export default function App() {
       } catch (e) {}
 
       // Load from Supabase (cloud-synced)
-      const [svcs, byUnit, storage, ratesData] = await Promise.all([
+      const [svcs, byUnit, storage, ratesData, extras, cleaners] = await Promise.all([
         fetchAllServices(),
         fetchStockByUnit(UNITS, UNIT_STOCK_TEMPLATE),
         fetchStockStorage(),
         fetchRates(),
+        fetchExtraClients(),
+        fetchCleanersDb(),
       ]);
       setRates(ratesData);
+      setExtraClients(extras);
+      setCleanersDb(cleaners);
       setServices(svcs);
       if (byUnit) {
         setStockByUnit(byUnit);
@@ -2394,6 +2639,12 @@ export default function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, async () => {
         setRates(await fetchRates());
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, async () => {
+        setExtraClients(await fetchExtraClients());
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cleaners_db' }, async () => {
+        setCleanersDb(await fetchCleanersDb());
       })
       .subscribe();
 
@@ -2461,6 +2712,35 @@ export default function App() {
     setRates(nextRates);
     await saveRates(nextRates);
   }
+
+  async function addClient(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    try {
+      await addClientToDb(trimmed);
+      setExtraClients(await fetchExtraClients());
+      logAction({
+        user_name: currentUser?.displayName || 'desconocido',
+        action: 'created', entity: 'client', entity_id: trimmed,
+        summary: `Agregó cliente nuevo · ${trimmed}`,
+      });
+    } catch (e) { alert('Error: ' + (e.message || 'no se pudo agregar')); }
+  }
+
+  async function addCleaner(name, password) {
+    const trimmed = (name || '').trim();
+    const pass = (password || '').trim();
+    if (!trimmed || !pass) return;
+    try {
+      await addCleanerToDb(trimmed, pass);
+      setCleanersDb(await fetchCleanersDb());
+      logAction({
+        user_name: currentUser?.displayName || 'desconocido',
+        action: 'created', entity: 'cleaner', entity_id: trimmed,
+        summary: `Agregó cleaner nuevo · ${trimmed}`,
+      });
+    } catch (e) { alert('Error: ' + (e.message || 'no se pudo agregar')); }
+  }
   function openEdit(svc) {
     setEditingService(svc);
     setShowAdd(true);
@@ -2489,6 +2769,8 @@ export default function App() {
   }
 
   // Visitors see the landing page first (public)
+  const allCleanersInit = [...new Set([...CLEANERS, ...cleanersDb.map((c) => c.name)])];
+
   if (!currentUser && showLanding) {
     return (
       <div>
@@ -2504,12 +2786,15 @@ export default function App() {
         {globalStyle}
         {authStep === 'role' && <RoleSelector onPick={(r) => setAuthStep(r === 'admin' ? 'adminLogin' : 'cleanerLogin')} onBack={() => setShowLanding(true)} />}
         {authStep === 'adminLogin' && <AdminLogin onLogin={handleLogin} onBack={() => setAuthStep('role')} />}
-        {authStep === 'cleanerLogin' && <CleanerLogin onLogin={handleLogin} onBack={() => setAuthStep('role')} />}
+        {authStep === 'cleanerLogin' && <CleanerLogin onLogin={handleLogin} onBack={() => setAuthStep('role')} cleanersDb={cleanersDb} allCleaners={allCleanersInit} />}
       </div>
     );
   }
 
   const isCleaner = currentUser.role === 'cleaner';
+  // Merge default UNITS/CLEANERS with ones added by admin (deduped)
+  const allClients = [...new Set([...UNITS, ...extraClients])];
+  const allCleaners = [...new Set([...CLEANERS, ...cleanersDb.map((c) => c.name)])];
   // Force registro tab for cleaners
   const activeTab = isCleaner ? 'registro' : tab;
 
@@ -2518,14 +2803,16 @@ export default function App() {
       {globalStyle}
       <div className="w-full max-w-md relative pb-32" style={{ background: c.cream, minHeight: '100vh' }}>
         {!isCleaner && activeTab === 'home' && <HomeTab services={services} setTab={setTab} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
-        {activeTab === 'registro' && <RegistroTab services={services} onDelete={deleteService} onEdit={openEdit} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
+        {activeTab === 'registro' && <RegistroTab services={services} onDelete={deleteService} onEdit={openEdit} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allCleaners={allCleaners} />}
         {!isCleaner && activeTab === 'graficas' && <GraficasTab services={services} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         <BottomNav tab={activeTab} setTab={setTab} onAdd={() => setShowAdd(true)} isCleaner={isCleaner} />
-        {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} rates={rates} />}
-        {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} onOpenSettings={() => { setShowUserMenu(false); setShowSettings(true); }} onOpenHistorial={() => { setShowUserMenu(false); setShowHistorial(true); }} />}
+        {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} rates={rates} unitsList={allClients} cleanersList={allCleaners} />}
+        {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} onOpenSettings={() => { setShowUserMenu(false); setShowSettings(true); }} onOpenHistorial={() => { setShowUserMenu(false); setShowHistorial(true); }} onOpenAddClient={() => { setShowUserMenu(false); setShowAddClient(true); }} onOpenAddCleaner={() => { setShowUserMenu(false); setShowAddCleaner(true); }} />}
         {showSettings && <SettingsModal initialRates={rates} onClose={() => setShowSettings(false)} onSave={updateRates} />}
         {showHistorial && <HistorialModal onClose={() => setShowHistorial(false)} />}
+        {showAddClient && <AddClientModal onClose={() => setShowAddClient(false)} onSave={addClient} existingClients={allClients} />}
+        {showAddCleaner && <AddCleanerModal onClose={() => setShowAddCleaner(false)} onSave={addCleaner} existingCleaners={allCleaners} />}
       </div>
     </div>
   );
