@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Plus, Home, ClipboardList, BarChart3, Package, Trash2, X, Sparkles,
   Clock, DollarSign, TrendingUp, AlertCircle, CheckCircle2,
-  Minus, ChevronRight, ChevronLeft, Warehouse, Building2, Eye, EyeOff, LogOut, User, Shield, ShieldCheck, ArrowLeft
+  Minus, ChevronRight, ChevronLeft, Warehouse, Building2, Eye, EyeOff, LogOut, User, Shield, ShieldCheck, ArrowLeft, Calendar, Menu, Settings
 } from 'lucide-react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip,
@@ -142,6 +142,26 @@ async function addClientToDb(name) {
 
 async function addCleanerToDb(name, password) {
   const { error } = await supabase.from('cleaners_db').insert({ name, password });
+  if (error) throw error;
+}
+
+// ---------- Schedule ----------
+async function fetchSchedule() {
+  const { data, error } = await supabase.from('schedule').select('*').order('fecha').order('hora');
+  if (error) { console.error('fetch schedule', error); return []; }
+  return data || [];
+}
+async function addScheduleToDb(entry) {
+  const { data, error } = await supabase.from('schedule').insert(entry).select().single();
+  if (error) throw error;
+  return data;
+}
+async function updateScheduleInDb(id, patch) {
+  const { error } = await supabase.from('schedule').update(patch).eq('id', id);
+  if (error) throw error;
+}
+async function deleteScheduleFromDb(id) {
+  const { error } = await supabase.from('schedule').delete().eq('id', id);
   if (error) throw error;
 }
 
@@ -2181,6 +2201,256 @@ function UnitPickerModal({ units, stockByUnit, selected, onSelect, onClose }) {
   );
 }
 
+function ScheduleModal({ onClose, onSave, existing, unitsList, cleanersList }) {
+  const [fecha, setFecha] = useState(existing?.fecha || todayISO());
+  const [hora, setHora] = useState(existing?.hora || '');
+  const [unidad, setUnidad] = useState(existing?.unidad || '');
+  const [cleaners, setCleaners] = useState(existing?.cleaners || []);
+  const [tipo, setTipo] = useState(existing?.tipo || 'Limpieza');
+  const [notas, setNotas] = useState(existing?.notas || '');
+  const canSave = fecha && unidad && cleaners.length > 0;
+
+  const inputStyle = { background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 };
+
+  function toggleCleaner(name) {
+    setCleaners(cleaners.includes(name) ? cleaners.filter((n) => n !== name) : [...cleaners, name]);
+  }
+
+  function handleSave() {
+    if (!canSave) return;
+    const payload = {
+      fecha, hora: hora || null, unidad, cleaners, tipo, notas: notas || null, estado: existing?.estado || 'programado',
+    };
+    if (existing?.id) payload.id = existing.id;
+    onSave(payload);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Calendar size={12} style={{ color: c.apricot }} />
+              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>AGENDA</span>
+            </div>
+            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>{existing?.id ? 'Editar servicio programado' : 'Programar servicio'}</h2>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
+            <X size={16} style={{ color: c.navy }} />
+          </button>
+        </div>
+
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Fecha</div>
+          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)}
+            className="w-full px-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+        </div>
+
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Hora (opcional)</div>
+          <input type="time" value={hora} onChange={(e) => setHora(e.target.value)}
+            className="w-full px-4 py-3 rounded-2xl outline-none" style={inputStyle} />
+        </div>
+
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Cliente / Unidad</div>
+          <select value={unidad} onChange={(e) => setUnidad(e.target.value)}
+            className="w-full px-4 py-3 rounded-2xl outline-none appearance-none" style={inputStyle}>
+            <option value="">Selecciona unidad</option>
+            {unitsList.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Tipo</div>
+          <div className="flex gap-2">
+            {['Limpieza', 'Extra Task'].map((t) => (
+              <button key={t} onClick={() => setTipo(t)}
+                className="flex-1 py-2 rounded-full text-xs font-semibold"
+                style={{
+                  background: tipo === t ? c.navy : c.cream, color: tipo === t ? c.paper : c.graytext,
+                  border: `1px solid ${tipo === t ? c.navy : c.divider}`
+                }}>{t}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Cleaners asignadas</div>
+          <div className="flex gap-2 flex-wrap">
+            {cleanersList.map((cl) => (
+              <button key={cl} onClick={() => toggleCleaner(cl)}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{
+                  background: cleaners.includes(cl) ? c.gold : c.cream,
+                  color: cleaners.includes(cl) ? c.paper : c.graytext,
+                  border: `1px solid ${cleaners.includes(cl) ? c.gold : c.divider}`
+                }}>{cl}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Notas (opcional)</div>
+          <textarea value={notas} onChange={(e) => setNotas(e.target.value)} rows={2} placeholder="Instrucciones, horario de check-in/out, llaves…"
+            className="w-full px-4 py-3 rounded-2xl outline-none resize-none" style={inputStyle} />
+        </div>
+
+        <button onClick={handleSave} disabled={!canSave}
+          className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide"
+          style={{ background: canSave ? c.navy : c.divider, color: canSave ? c.paper : c.graytext }}>
+          {existing?.id ? 'GUARDAR CAMBIOS' : 'PROGRAMAR SERVICIO'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, onDelete }) {
+  const [filterMes, setFilterMes] = useState('todos');
+
+  // Agrupa por mes (más reciente primero)
+  const sorted = [...schedule].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+  const availableMonths = [...new Set(sorted.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort();
+  const list = filterMes === 'todos' ? sorted : sorted.filter((s) => (s.fecha || '').startsWith(filterMes));
+
+  // Agrupa por fecha
+  const grouped = {};
+  list.forEach((s) => {
+    if (!grouped[s.fecha]) grouped[s.fecha] = [];
+    grouped[s.fecha].push(s);
+  });
+
+  const todayStr = todayISO();
+  const chip = (label, val, current, setter) => (
+    <button onClick={() => setter(val)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
+      style={{ background: current === val ? c.charcoal : c.paper, color: current === val ? c.paper : c.graytext, border: `1px solid ${current === val ? c.charcoal : c.divider}` }}>
+      {label}
+    </button>
+  );
+
+  const fmtDate = (iso) => {
+    try {
+      const [y, m, d] = iso.split('-');
+      const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+      const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      return `${days[date.getDay()]}, ${parseInt(d)} de ${months[parseInt(m) - 1]}`;
+    } catch (e) { return iso; }
+  };
+
+  return (
+    <div>
+      <Header subtitle="Agenda" currentUser={currentUser} onOpenMenu={onOpenMenu} />
+      <div className="px-6 -mt-2 pb-4">
+        <div className="flex gap-2 mb-3">
+          <button onClick={onOpenNew} className="flex-1 py-3 rounded-2xl font-semibold text-sm tracking-wider flex items-center justify-center gap-2"
+            style={{ background: c.apricot, color: c.navy }}>
+            <Plus size={16} /> PROGRAMAR SERVICIO
+          </button>
+        </div>
+        {availableMonths.length > 0 && (
+          <>
+            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes</div>
+            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+              {chip('Todos', 'todos', filterMes, setFilterMes)}
+              {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="px-6">
+        {list.length === 0 ? (
+          <div className="rounded-2xl p-8 text-center" style={{ background: c.paper }}>
+            <Calendar size={28} style={{ color: c.divider, margin: '0 auto 8px' }} />
+            <div className="text-sm" style={{ color: c.graytext }}>No hay servicios programados</div>
+          </div>
+        ) : (
+          Object.keys(grouped).sort().map((date) => {
+            const isPast = date < todayStr;
+            const isToday = date === todayStr;
+            return (
+              <div key={date} className="mb-5">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="text-xs font-semibold capitalize" style={{ color: isToday ? c.apricot : (isPast ? c.graytext : c.navy) }}>
+                    {fmtDate(date)}
+                  </div>
+                  {isToday && <span className="text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ background: c.apricot, color: c.navy }}>HOY</span>}
+                </div>
+                {grouped[date].map((item) => (
+                  <div key={item.id} onClick={() => onEdit(item)}
+                    className="rounded-2xl p-4 mb-2 cursor-pointer"
+                    style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)', opacity: isPast ? 0.6 : 1 }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          {item.hora && <span className="text-sm font-bold" style={{ color: c.navy }}>{item.hora}</span>}
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: c.cream, color: c.graytext }}>{item.tipo}</span>
+                        </div>
+                        <div className="text-sm font-semibold" style={{ color: c.navy }}>{item.unidad}</div>
+                        <div className="text-xs mt-1" style={{ color: c.graytext }}>{(item.cleaners || []).join(' · ')}</div>
+                        {item.notas && <div className="text-xs mt-2 italic" style={{ color: c.charcoal }}>{item.notas}</div>}
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); if (confirm('¿Eliminar este servicio programado?')) onDelete(item.id); }}
+                        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
+                        <Trash2 size={13} style={{ color: c.terra }} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MenuTab({ currentUser, onOpenMenu, setTab, onOpenHistorial, onOpenSettings, onOpenAddClient, onOpenAddCleaner, onLogout }) {
+  const canSeeMoney = hasFullAccess(currentUser);
+
+  const MenuItem = ({ icon: Icon, label, desc, onClick, accent }) => (
+    <button onClick={onClick} className="w-full flex items-center gap-4 p-4 rounded-2xl mb-2 text-left"
+      style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
+      <div className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: accent || c.cream }}>
+        <Icon size={18} style={{ color: accent ? c.paper : c.navy }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold" style={{ color: c.navy }}>{label}</div>
+        {desc && <div className="text-xs mt-0.5" style={{ color: c.graytext }}>{desc}</div>}
+      </div>
+      <ChevronRight size={16} style={{ color: c.graytext }} />
+    </button>
+  );
+
+  return (
+    <div>
+      <Header subtitle="Menú" currentUser={currentUser} onOpenMenu={onOpenMenu} />
+      <div className="px-6 -mt-2 pb-6">
+        <div className="text-[10px] tracking-[0.3em] font-semibold uppercase mb-3 mt-3" style={{ color: c.apricot }}>HERRAMIENTAS</div>
+        <MenuItem icon={BarChart3} label="Gráficas y Nómina" desc="KPIs, ganancias por cleaner, reportes" onClick={() => setTab('graficas')} />
+        <MenuItem icon={Package} label="Stock" desc="Inventario por unidad y storage central" onClick={() => setTab('stock')} />
+
+        {canSeeMoney && (
+          <>
+            <div className="text-[10px] tracking-[0.3em] font-semibold uppercase mb-3 mt-6" style={{ color: c.apricot }}>ADMINISTRACIÓN</div>
+            {onOpenAddClient && <MenuItem icon={Building2} label="Agregar cliente" desc="Nuevos clientes o unidades" onClick={onOpenAddClient} />}
+            {onOpenAddCleaner && <MenuItem icon={User} label="Agregar cleaner" desc="Dar de alta nuevo equipo" onClick={onOpenAddCleaner} />}
+            {onOpenSettings && <MenuItem icon={Settings} label="Ajustes de tarifas" desc="Precios por tipo de servicio" onClick={onOpenSettings} accent={c.apricot} />}
+            {onOpenHistorial && <MenuItem icon={ClipboardList} label="Historial de cambios" desc="Auditoría de todas las ediciones" onClick={onOpenHistorial} />}
+          </>
+        )}
+
+        <div className="text-[10px] tracking-[0.3em] font-semibold uppercase mb-3 mt-6" style={{ color: c.apricot }}>SESIÓN</div>
+        <MenuItem icon={LogOut} label="Cerrar sesión" desc={`Conectada como ${currentUser?.displayName || ''}`} onClick={onLogout} accent={c.terra} />
+      </div>
+    </div>
+  );
+}
+
 function BottomNav({ tab, setTab, onAdd, isCleaner }) {
   if (isCleaner) {
     return (
@@ -2200,8 +2470,8 @@ function BottomNav({ tab, setTab, onAdd, isCleaner }) {
   const items = [
     { id: 'home', icon: Home, label: 'Inicio' },
     { id: 'registro', icon: ClipboardList, label: 'Registro' },
-    { id: 'graficas', icon: BarChart3, label: 'Gráficas' },
-    { id: 'stock', icon: Package, label: 'Stock' },
+    { id: 'calendario', icon: Calendar, label: 'Agenda' },
+    { id: 'menu', icon: Menu, label: 'Menú' },
   ];
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40 max-w-md mx-auto">
@@ -2570,6 +2840,9 @@ export default function App() {
   const [showAddCleaner, setShowAddCleaner] = useState(false);
   const [extraClients, setExtraClients] = useState([]);
   const [cleanersDb, setCleanersDb] = useState([]);
+  const [schedule, setSchedule] = useState([]);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState(null);
   const [showLanding, setShowLanding] = useState(true);
   const [lang, setLang] = useState(() => {
     try { const saved = localStorage.getItem('wg-lang'); return saved === 'es' ? 'es' : 'en'; } catch(e) { return 'en'; }
@@ -2595,17 +2868,19 @@ export default function App() {
       } catch (e) {}
 
       // Load from Supabase (cloud-synced)
-      const [svcs, byUnit, storage, ratesData, extras, cleaners] = await Promise.all([
+      const [svcs, byUnit, storage, ratesData, extras, cleaners, sched] = await Promise.all([
         fetchAllServices(),
         fetchStockByUnit(UNITS, UNIT_STOCK_TEMPLATE),
         fetchStockStorage(),
         fetchRates(),
         fetchExtraClients(),
         fetchCleanersDb(),
+        fetchSchedule(),
       ]);
       setRates(ratesData);
       setExtraClients(extras);
       setCleanersDb(cleaners);
+      setSchedule(sched);
       setServices(svcs);
       if (byUnit) {
         setStockByUnit(byUnit);
@@ -2645,6 +2920,9 @@ export default function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cleaners_db' }, async () => {
         setCleanersDb(await fetchCleanersDb());
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
+        setSchedule(await fetchSchedule());
       })
       .subscribe();
 
@@ -2741,6 +3019,45 @@ export default function App() {
       });
     } catch (e) { alert('Error: ' + (e.message || 'no se pudo agregar')); }
   }
+
+  async function saveSchedule(entry) {
+    try {
+      if (entry.id) {
+        const { id, ...patch } = entry;
+        await updateScheduleInDb(id, patch);
+        logAction({
+          user_name: currentUser?.displayName || 'desconocido',
+          action: 'updated', entity: 'schedule', entity_id: String(id),
+          summary: `Editó agenda · ${entry.fecha} ${entry.hora || ''} · ${entry.unidad}`,
+        });
+      } else {
+        const created = await addScheduleToDb(entry);
+        logAction({
+          user_name: currentUser?.displayName || 'desconocido',
+          action: 'created', entity: 'schedule', entity_id: String(created?.id || ''),
+          summary: `Programó servicio · ${entry.fecha} ${entry.hora || ''} · ${entry.unidad} (${(entry.cleaners || []).join(', ')})`,
+        });
+      }
+      setSchedule(await fetchSchedule());
+      setShowScheduleModal(false);
+      setEditingSchedule(null);
+    } catch (e) { alert('Error: ' + (e.message || 'no se pudo guardar')); }
+  }
+
+  async function deleteSchedule(id) {
+    const item = schedule.find((s) => s.id === id);
+    try {
+      await deleteScheduleFromDb(id);
+      setSchedule(schedule.filter((s) => s.id !== id));
+      if (item) {
+        logAction({
+          user_name: currentUser?.displayName || 'desconocido',
+          action: 'deleted', entity: 'schedule', entity_id: String(id),
+          summary: `Eliminó agenda · ${item.fecha} ${item.hora || ''} · ${item.unidad}`,
+        });
+      }
+    } catch (e) { alert('Error: ' + (e.message || 'no se pudo eliminar')); }
+  }
   function openEdit(svc) {
     setEditingService(svc);
     setShowAdd(true);
@@ -2805,7 +3122,9 @@ export default function App() {
         {!isCleaner && activeTab === 'home' && <HomeTab services={services} setTab={setTab} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         {activeTab === 'registro' && <RegistroTab services={services} onDelete={deleteService} onEdit={openEdit} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allCleaners={allCleaners} />}
         {!isCleaner && activeTab === 'graficas' && <GraficasTab services={services} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
-        {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
+        {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allClients={allClients} />}
+        {!isCleaner && activeTab === 'calendario' && <CalendarioTab schedule={schedule} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} onOpenNew={() => { setEditingSchedule(null); setShowScheduleModal(true); }} onEdit={(it) => { setEditingSchedule(it); setShowScheduleModal(true); }} onDelete={deleteSchedule} />}
+        {!isCleaner && activeTab === 'menu' && <MenuTab currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} setTab={setTab} onOpenHistorial={() => setShowHistorial(true)} onOpenSettings={() => setShowSettings(true)} onOpenAddClient={() => setShowAddClient(true)} onOpenAddCleaner={() => setShowAddCleaner(true)} onLogout={handleLogout} />}
         <BottomNav tab={activeTab} setTab={setTab} onAdd={() => setShowAdd(true)} isCleaner={isCleaner} />
         {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} rates={rates} unitsList={allClients} cleanersList={allCleaners} />}
         {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} onOpenSettings={() => { setShowUserMenu(false); setShowSettings(true); }} onOpenHistorial={() => { setShowUserMenu(false); setShowHistorial(true); }} onOpenAddClient={() => { setShowUserMenu(false); setShowAddClient(true); }} onOpenAddCleaner={() => { setShowUserMenu(false); setShowAddCleaner(true); }} />}
@@ -2813,6 +3132,7 @@ export default function App() {
         {showHistorial && <HistorialModal onClose={() => setShowHistorial(false)} />}
         {showAddClient && <AddClientModal onClose={() => setShowAddClient(false)} onSave={addClient} existingClients={allClients} />}
         {showAddCleaner && <AddCleanerModal onClose={() => setShowAddCleaner(false)} onSave={addCleaner} existingCleaners={allCleaners} />}
+        {showScheduleModal && <ScheduleModal onClose={() => { setShowScheduleModal(false); setEditingSchedule(null); }} onSave={saveSchedule} existing={editingSchedule} unitsList={allClients} cleanersList={allCleaners} />}
       </div>
     </div>
   );
