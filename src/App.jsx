@@ -2308,13 +2308,38 @@ function ScheduleModal({ onClose, onSave, existing, unitsList, cleanersList }) {
   );
 }
 
-function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, onDelete }) {
+function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, onDelete, allClients: allClientsProp, allCleaners: allCleanersProp }) {
+  const allClientsCal = allClientsProp || UNITS;
+  const allCleanersCal = allCleanersProp || CLEANERS;
   const [filterMes, setFilterMes] = useState('todos');
+  const [filterSemana, setFilterSemana] = useState('todas');
+  const [filterCleanerCal, setFilterCleanerCal] = useState('todas');
+  const [filterCliente, setFilterCliente] = useState('todos');
 
-  // Agrupa por mes (más reciente primero)
+  // Devuelve el número de semana del mes (1-5) basado en el día de la fecha
+  useEffect(() => {
+    if (filterMes === 'todos' && filterSemana !== 'todas') setFilterSemana('todas');
+  }, [filterMes, filterSemana]);
+
+  function getWeekOfMonth(iso) {
+    try {
+      const d = parseInt(iso.split('-')[2], 10);
+      return Math.ceil(d / 7); // 1-5
+    } catch (e) { return 0; }
+  }
+
   const sorted = [...schedule].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
   const availableMonths = [...new Set(sorted.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort();
-  const list = filterMes === 'todos' ? sorted : sorted.filter((s) => (s.fecha || '').startsWith(filterMes));
+
+  // Si está filtrando por mes, calcular semanas disponibles de ese mes
+  const availableWeeks = filterMes === 'todos' ? [] :
+    [...new Set(sorted.filter((s) => (s.fecha || '').startsWith(filterMes)).map((s) => getWeekOfMonth(s.fecha)).filter(Boolean))].sort();
+
+  let list = sorted;
+  if (filterMes !== 'todos') list = list.filter((s) => (s.fecha || '').startsWith(filterMes));
+  if (filterSemana !== 'todas' && filterMes !== 'todos') list = list.filter((s) => getWeekOfMonth(s.fecha) === filterSemana);
+  if (filterCleanerCal !== 'todas') list = list.filter((s) => (s.cleaners || []).includes(filterCleanerCal));
+  if (filterCliente !== 'todos') list = list.filter((s) => s.unidad === filterCliente);
 
   // Agrupa por fecha
   const grouped = {};
@@ -2354,12 +2379,31 @@ function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, o
         {availableMonths.length > 0 && (
           <>
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes</div>
-            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
               {chip('Todos', 'todos', filterMes, setFilterMes)}
               {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
             </div>
           </>
         )}
+        {filterMes !== 'todos' && availableWeeks.length > 0 && (
+          <>
+            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Semana del mes</div>
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+              {chip('Todas', 'todas', filterSemana, setFilterSemana)}
+              {availableWeeks.map((w) => chip(`Semana ${w}`, w, filterSemana, setFilterSemana))}
+            </div>
+          </>
+        )}
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cliente</div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+          {chip('Todos', 'todos', filterCliente, setFilterCliente)}
+          {allClientsCal.map((u) => chip(u, u, filterCliente, setFilterCliente))}
+        </div>
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
+        <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+          {chip('Todas', 'todas', filterCleanerCal, setFilterCleanerCal)}
+          {allCleanersCal.map((cl) => chip(cl, cl, filterCleanerCal, setFilterCleanerCal))}
+        </div>
       </div>
       <div className="px-6">
         {list.length === 0 ? (
@@ -3123,7 +3167,7 @@ export default function App() {
         {activeTab === 'registro' && <RegistroTab services={services} onDelete={deleteService} onEdit={openEdit} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allCleaners={allCleaners} />}
         {!isCleaner && activeTab === 'graficas' && <GraficasTab services={services} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allClients={allClients} />}
-        {!isCleaner && activeTab === 'calendario' && <CalendarioTab schedule={schedule} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} onOpenNew={() => { setEditingSchedule(null); setShowScheduleModal(true); }} onEdit={(it) => { setEditingSchedule(it); setShowScheduleModal(true); }} onDelete={deleteSchedule} />}
+        {!isCleaner && activeTab === 'calendario' && <CalendarioTab schedule={schedule} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} onOpenNew={() => { setEditingSchedule(null); setShowScheduleModal(true); }} onEdit={(it) => { setEditingSchedule(it); setShowScheduleModal(true); }} onDelete={deleteSchedule} allClients={allClients} allCleaners={allCleaners} />}
         {!isCleaner && activeTab === 'menu' && <MenuTab currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} setTab={setTab} onOpenHistorial={() => setShowHistorial(true)} onOpenSettings={() => setShowSettings(true)} onOpenAddClient={() => setShowAddClient(true)} onOpenAddCleaner={() => setShowAddCleaner(true)} onLogout={handleLogout} />}
         <BottomNav tab={activeTab} setTab={setTab} onAdd={() => setShowAdd(true)} isCleaner={isCleaner} />
         {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} rates={rates} unitsList={allClients} cleanersList={allCleaners} />}
