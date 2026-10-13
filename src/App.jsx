@@ -470,8 +470,8 @@ function HistorialModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -527,8 +527,8 @@ function AddClientModal({ onClose, onSave, existingClients }) {
   const canSave = trimmed.length > 0 && !alreadyExists;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -567,8 +567,8 @@ function AddCleanerModal({ onClose, onSave, existingCleaners }) {
   const canSave = trimmedName.length > 0 && trimmedPass.length >= 3 && !alreadyExists;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -632,8 +632,8 @@ function SettingsModal({ initialRates, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
 
         <div className="flex items-center justify-between mb-5">
@@ -1150,8 +1150,8 @@ function CleanerLogin({ onLogin, onBack, cleanersDb = [], allCleaners: allCleane
 function UserMenu({ user, onLogout, onClose, onOpenSettings, onOpenHistorial, onOpenAddClient, onOpenAddCleaner }) {
   const isAdmin = user.role === 'admin';
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
         <div className="flex items-center gap-4 mb-6 px-2">
           <div className="w-14 h-14 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
@@ -1538,8 +1538,8 @@ function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingServi
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(43,41,38,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(43,41,38,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -1701,7 +1701,7 @@ function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
       <Header subtitle={`Buen día ${currentUser ? currentUser.displayName.split(' ')[0] : ''} ✨`} showLogo currentUser={currentUser} onOpenMenu={onOpenMenu} />
       <div className="px-6 -mt-2">
         <div className="text-sm mb-4 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>{monthLabel(monthKey)}</div>
-        <div className="grid grid-cols-2 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <KPI label="Servicios" value={totalSvcs} sub="este mes" accent={c.gold} icon={Sparkles} />
           <KPI label="Horas" value={totalHrs.toFixed(2).replace(/\.?0+$/, '')} sub="trabajadas" accent={c.sage} icon={Clock} />
           {hasFullAccess(currentUser) ? (
@@ -2246,8 +2246,8 @@ function UnitPickerModal({ units, stockByUnit, selected, onSelect, onClose }) {
   const [query, setQuery] = useState('');
   const filtered = units.filter((u) => u.toLowerCase().includes(query.toLowerCase()));
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.5)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[85vh] overflow-hidden flex flex-col" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.5)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[85vh] overflow-hidden flex flex-col" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -2339,8 +2339,8 @@ function ScheduleModal({ onClose, onSave, existing, unitsList, cleanersList }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-[32px] p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -2618,7 +2618,7 @@ function MenuTab({ currentUser, onOpenMenu, setTab, onOpenHistorial, onOpenSetti
 function BottomNav({ tab, setTab, onAdd, isCleaner }) {
   if (isCleaner) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 z-40 max-w-md mx-auto">
+      <div className="fixed bottom-0 left-0 right-0 z-40 max-w-md md:max-w-xl lg:max-w-2xl mx-auto">
         <div className="mx-4 mb-4 rounded-full px-2 py-2 flex items-center justify-center gap-4" style={{ background: c.navy, boxShadow: '0 8px 32px rgba(11,29,74,0.25)' }}>
           <button onClick={() => setTab('registro')} className="px-5 py-3 flex items-center gap-2">
             <ClipboardList size={18} style={{ color: c.apricot }} />
@@ -2638,7 +2638,7 @@ function BottomNav({ tab, setTab, onAdd, isCleaner }) {
     { id: 'menu', icon: Menu, label: 'Menú' },
   ];
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 max-w-md mx-auto">
+    <div className="fixed bottom-0 left-0 right-0 z-40 max-w-md md:max-w-xl lg:max-w-2xl mx-auto">
       <div className="mx-4 mb-4 rounded-full px-2 py-2 flex items-center justify-between" style={{ background: c.navy, boxShadow: '0 8px 32px rgba(11,29,74,0.25)' }}>
         {items.slice(0, 2).map((it) => (
           <button key={it.id} onClick={() => setTab(it.id)} className="flex-1 py-2 flex flex-col items-center gap-0.5" style={{ opacity: tab === it.id ? 1 : 0.5 }}>
@@ -3282,7 +3282,7 @@ export default function App() {
   return (
     <div className="min-h-screen w-full flex justify-center" style={{ background: c.cream }}>
       {globalStyle}
-      <div className="w-full max-w-md relative pb-32" style={{ background: c.cream, minHeight: '100vh' }}>
+      <div className="w-full max-w-md md:max-w-3xl lg:max-w-5xl xl:max-w-6xl relative pb-32" style={{ background: c.cream, minHeight: '100vh' }}>
         {!isCleaner && activeTab === 'home' && <HomeTab services={services} setTab={setTab} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
         {activeTab === 'registro' && <RegistroTab services={services} onDelete={deleteService} onEdit={openEdit} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allCleaners={allCleaners} />}
         {!isCleaner && activeTab === 'graficas' && <GraficasTab services={services} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
