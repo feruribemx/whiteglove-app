@@ -1789,33 +1789,33 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu, allC
     <div>
       <Header subtitle="Registro" currentUser={currentUser} onOpenMenu={onOpenMenu} />
       <div className="px-6 -mt-2 pb-4">
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes</div>
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes <span className="text-[9px] font-normal italic normal-case" style={{ color: c.graytext }}>(toca varios para combinar)</span></div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chip('Todos', 'todos', filterMes, setFilterMes)}
-          {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
+          {chipMulti('Todos', '__all__', filterMes, setFilterMes)}
+          {availableMonths.map((m) => chipMulti(fmtMonthKey(m), m, filterMes, setFilterMes))}
         </div>
         <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cliente</div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chip('Todos', 'todas', filterUnidad, setFilterUnidad)}
-          {availableUnits.map((u) => chip(u, u, filterUnidad, setFilterUnidad))}
+          {chipMulti('Todos', '__all__', filterUnidad, setFilterUnidad)}
+          {availableUnits.map((u) => chipMulti(u, u, filterUnidad, setFilterUnidad))}
         </div>
         <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Tipo</div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chip('Todos', 'todos', filter, setFilter)}
-          {chip('Limpieza', 'Limpieza', filter, setFilter)}
-          {chip('Extra Task', 'Extra Task', filter, setFilter)}
+          {chipMulti('Todos', '__all__', filter, setFilter)}
+          {chipMulti('Limpieza', 'Limpieza', filter, setFilter)}
+          {chipMulti('Extra Task', 'Extra Task', filter, setFilter)}
         </div>
         {!isCleaner && (
           <>
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
             <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chip('Todas', 'todas', filterCleaner, setFilterCleaner)}
-              {CLEANERS.map((cl) => chip(cl, cl, filterCleaner, setFilterCleaner))}
+              {chipMulti('Todas', '__all__', filterCleaner, setFilterCleaner)}
+              {allCleaners.map((cl) => chipMulti(cl, cl, filterCleaner, setFilterCleaner))}
             </div>
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Capturado por</div>
             <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-              {chip('Todos', 'todos', filterCap, setFilterCap)}
-              {CAPTURISTAS.map((p) => chip(p, p, filterCap, setFilterCap))}
+              {chipMulti('Todos', '__all__', filterCap, setFilterCap)}
+              {CAPTURISTAS.map((p) => chipMulti(p, p, filterCap, setFilterCap))}
             </div>
           </>
         )}
