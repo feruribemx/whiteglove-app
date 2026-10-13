@@ -1748,34 +1748,42 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu, allC
   const isCleaner = currentUser?.role === 'cleaner';
   const canSeeCobro = hasFullAccess(currentUser);
   const canSeePagos = canManagePagos(currentUser);
-  const [filter, setFilter] = useState('todos');
-  const [filterCleaner, setFilterCleaner] = useState('todas');
-  const [filterCap, setFilterCap] = useState('todos');
-  const [filterMes, setFilterMes] = useState('todos');
-  const [filterUnidad, setFilterUnidad] = useState('todas');
+  const [filter, setFilter] = useState([]); // tipos
+  const [filterCleaner, setFilterCleaner] = useState([]);
+  const [filterCap, setFilterCap] = useState([]);
+  const [filterMes, setFilterMes] = useState([]);
+  const [filterUnidad, setFilterUnidad] = useState([]);
 
-  // Base: servicios visibles a este usuario (cleaner solo ve los suyos)
+  // Base: servicios visibles a este usuario
   const baseList = isCleaner
     ? services.filter((s) => cleanersOf(s).includes(currentUser.cleanerName))
     : services;
 
-  // Meses y clientes disponibles — extraídos dinámicamente de los servicios visibles
   const availableMonths = [...new Set(baseList.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
   const availableUnits = [...new Set(baseList.map((s) => s.unidad).filter(Boolean))].sort();
 
   let list = [...baseList].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
-  if (filterMes !== 'todos') list = list.filter((s) => (s.fecha || '').startsWith(filterMes));
-  if (filterUnidad !== 'todas') list = list.filter((s) => s.unidad === filterUnidad);
-  if (filter !== 'todos') list = list.filter((s) => s.tipo === filter);
-  if (!isCleaner && filterCleaner !== 'todas') list = list.filter((s) => cleanersOf(s).includes(filterCleaner));
-  if (!isCleaner && filterCap !== 'todos') list = list.filter((s) => s.capturista === filterCap);
+  if (filterMes.length > 0) list = list.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m)));
+  if (filterUnidad.length > 0) list = list.filter((s) => filterUnidad.includes(s.unidad));
+  if (filter.length > 0) list = list.filter((s) => filter.includes(s.tipo));
+  if (!isCleaner && filterCleaner.length > 0) list = list.filter((s) => cleanersOf(s).some((cl) => filterCleaner.includes(cl)));
+  if (!isCleaner && filterCap.length > 0) list = list.filter((s) => filterCap.includes(s.capturista));
 
-  const chip = (label, val, current, setter) => (
-    <button onClick={() => setter(val)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-      style={{ background: current === val ? c.charcoal : c.paper, color: current === val ? c.paper : c.graytext, border: `1px solid ${current === val ? c.charcoal : c.divider}` }}>
-      {label}
-    </button>
-  );
+  // Multi-select chip: 'todos' limpia la selección; otros valores toggle
+  const chipMulti = (label, val, arr, setter) => {
+    const isAll = val === '__all__';
+    const active = isAll ? arr.length === 0 : arr.includes(val);
+    const onClick = () => {
+      if (isAll) setter([]);
+      else setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
+    };
+    return (
+      <button onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
+        style={{ background: active ? c.charcoal : c.paper, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.charcoal : c.divider}` }}>
+        {label}
+      </button>
+    );
+  };
 
   return (
     <div>
@@ -1817,7 +1825,7 @@ function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu, allC
         {list.length === 0 ? (
           <div className="rounded-2xl p-8 text-center" style={{ background: c.paper }}><div className="text-sm" style={{ color: c.graytext }}>Nada aquí todavía</div></div>
         ) : (
-          list.map((s) => <ServiceCard key={s.id} svc={s} onDelete={canSeeCobro ? onDelete : null} onEdit={onEdit} isAdmin={!isCleaner} canSeeCobro={canSeeCobro} canSeePagos={canSeePagos} />)
+          list.map((s) => <ServiceCard key={s.id} svc={s} onDelete={!isCleaner ? onDelete : null} onEdit={onEdit} isAdmin={!isCleaner} canSeeCobro={canSeeCobro} canSeePagos={canSeePagos} />)
         )}
       </div>
     </div>
@@ -1830,12 +1838,13 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
   const isCleaner = currentUser?.role === 'cleaner';
   const canSeeCobro = hasFullAccess(currentUser);
   const canSeePagos = canManagePagos(currentUser);
-  const [filterMes, setFilterMes] = useState(currentMonthKey());
-  const [filterSemanaG, setFilterSemanaG] = useState('todas');
-  const [filterCleanerG, setFilterCleanerG] = useState('todas');
+  // En Gráficas default es el mes actual. Vacío = Año completo. 'anio' chip toggle lo mismo.
+  const [filterMes, setFilterMes] = useState([currentMonthKey()]);
+  const [filterSemanaG, setFilterSemanaG] = useState([]);
+  const [filterCleanerG, setFilterCleanerG] = useState([]);
   const [showServiceList, setShowServiceList] = useState(false);
+  const [yearMode, setYearMode] = useState(false);
 
-  // Devuelve el número de semana del mes (1-5) basado en el día de la fecha
   function getWeekOfMonth(iso) {
     try {
       const d = parseInt((iso || '').split('-')[2], 10);
@@ -1843,47 +1852,44 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
     } catch (e) { return 0; }
   }
 
-  // Reset semana cuando cambia mes a vista anual
   useEffect(() => {
-    if (filterMes === 'anio' && filterSemanaG !== 'todas') setFilterSemanaG('todas');
-  }, [filterMes, filterSemanaG]);
+    if (yearMode && filterSemanaG.length > 0) setFilterSemanaG([]);
+  }, [yearMode, filterSemanaG]);
 
-  // Base: cleaners solo ven lo suyo; admins todo
   const baseList = isCleaner
     ? services.filter((s) => cleanersOf(s).includes(currentUser.cleanerName))
     : services;
 
-  // Meses disponibles dinámicos (incluye el actual aunque esté vacío)
   const availableMonths = [...new Set(baseList.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
   const curM = currentMonthKey();
   if (!availableMonths.includes(curM)) availableMonths.unshift(curM);
 
-  // Aplica filtros — soporta año completo con filterMes === 'anio' + año actual
   const currentYear = new Date().getFullYear().toString();
   let monthSvcs;
-  if (filterMes === 'anio') {
+  if (yearMode) {
     monthSvcs = baseList.filter((s) => (s.fecha || '').startsWith(currentYear));
+  } else if (filterMes.length === 0) {
+    monthSvcs = baseList; // vacío = todo lo histórico
   } else {
-    monthSvcs = baseList.filter((s) => (s.fecha || '').startsWith(filterMes));
+    monthSvcs = baseList.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m)));
   }
 
-  // Semanas disponibles (solo cuando se filtra por un mes específico)
-  const availableWeeks = filterMes === 'anio' ? [] :
+  const availableWeeks = (yearMode || filterMes.length === 0) ? [] :
     [...new Set(monthSvcs.map((s) => getWeekOfMonth(s.fecha)).filter(Boolean))].sort();
 
-  if (filterSemanaG !== 'todas' && filterMes !== 'anio') {
-    monthSvcs = monthSvcs.filter((s) => getWeekOfMonth(s.fecha) === filterSemanaG);
+  if (filterSemanaG.length > 0 && !yearMode && filterMes.length > 0) {
+    monthSvcs = monthSvcs.filter((s) => filterSemanaG.includes(getWeekOfMonth(s.fecha)));
   }
 
-  if (!isCleaner && filterCleanerG !== 'todas') {
-    monthSvcs = monthSvcs.filter((s) => cleanersOf(s).includes(filterCleanerG));
+  if (!isCleaner && filterCleanerG.length > 0) {
+    monthSvcs = monthSvcs.filter((s) => cleanersOf(s).some((cl) => filterCleanerG.includes(cl)));
   }
 
   // Lista de servicios ordenada (más reciente primero)
   const periodServices = [...monthSvcs].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
 
   // Si el admin filtra por 1 cleaner, mostramos solo ese; si no, todos
-  const cleanersToShow = (!isCleaner && filterCleanerG !== 'todas') ? [filterCleanerG] : allCleanersG;
+  const cleanersToShow = (!isCleaner && filterCleanerG.length > 0) ? filterCleanerG : allCleanersG;
 
   const nomina = cleanersToShow.map((cl) => {
     const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
@@ -1903,12 +1909,21 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
   const byUnit = UNITS.map((u) => ({ name: u, servicios: monthSvcs.filter((s) => s.unidad === u).length })).filter((r) => r.servicios > 0);
   const byType = TYPES.map((t) => ({ name: t, value: monthSvcs.filter((s) => s.tipo === t).reduce((sum, s) => sum + (s.cobro || 0), 0) })).filter((r) => r.value > 0);
 
-  const chip = (label, val, current, setter) => (
-    <button onClick={() => setter(val)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-      style={{ background: current === val ? c.charcoal : c.paper, color: current === val ? c.paper : c.graytext, border: `1px solid ${current === val ? c.charcoal : c.divider}` }}>
-      {label}
-    </button>
-  );
+  // Multi-select chip: 'todos' limpia la selección; otros valores toggle
+  const chipMulti = (label, val, arr, setter) => {
+    const isAll = val === '__all__';
+    const active = isAll ? arr.length === 0 : arr.includes(val);
+    const onClick = () => {
+      if (isAll) setter([]);
+      else setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
+    };
+    return (
+      <button onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
+        style={{ background: active ? c.charcoal : c.paper, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.charcoal : c.divider}` }}>
+        {label}
+      </button>
+    );
+  };
   const PIE_COLORS = [c.gold, c.blushDeep];
 
   const ChartCard = ({ title, subtitle, children, empty }) => (
@@ -1925,17 +1940,21 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
     <div>
       <Header subtitle="Gráficas" currentUser={currentUser} onOpenMenu={onOpenMenu} />
       <div className="px-6 -mt-2 pb-4">
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Período</div>
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Período <span className="text-[9px] font-normal italic normal-case" style={{ color: c.graytext }}>(toca varios para combinar)</span></div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chip(`Año ${currentYear}`, 'anio', filterMes, setFilterMes)}
-          {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
+          <button onClick={() => { setYearMode(!yearMode); if (!yearMode) setFilterMes([]); }}
+            className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
+            style={{ background: yearMode ? c.charcoal : c.paper, color: yearMode ? c.paper : c.graytext, border: `1px solid ${yearMode ? c.charcoal : c.divider}` }}>
+            Año {currentYear}
+          </button>
+          {!yearMode && availableMonths.map((m) => chipMultiG(fmtMonthKey(m), m, filterMes, setFilterMes))}
         </div>
-        {filterMes !== 'anio' && availableWeeks.length > 0 && (
+        {!yearMode && filterMes.length > 0 && availableWeeks.length > 0 && (
           <>
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Semana del mes</div>
             <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chip('Todas', 'todas', filterSemanaG, setFilterSemanaG)}
-              {availableWeeks.map((w) => chip(`Semana ${w}`, w, filterSemanaG, setFilterSemanaG))}
+              {chipMultiG('Todas', '__all__', filterSemanaG, setFilterSemanaG)}
+              {availableWeeks.map((w) => chipMultiG(`Semana ${w}`, w, filterSemanaG, setFilterSemanaG))}
             </div>
           </>
         )}
@@ -1943,17 +1962,17 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
           <>
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
             <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-              {chip('Todas', 'todas', filterCleanerG, setFilterCleanerG)}
-              {allCleanersG.map((cl) => chip(cl, cl, filterCleanerG, setFilterCleanerG))}
+              {chipMultiG('Todas', '__all__', filterCleanerG, setFilterCleanerG)}
+              {allCleanersG.map((cl) => chipMultiG(cl, cl, filterCleanerG, setFilterCleanerG))}
             </div>
           </>
         )}
       </div>
       <div className="px-6">
         <div className="text-sm mb-4 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>
-          {filterMes === 'anio' ? `Año ${currentYear}` : monthLabel(filterMes)}
-          {filterSemanaG !== 'todas' && filterMes !== 'anio' ? ` · Semana ${filterSemanaG}` : ''}
-          {filterCleanerG !== 'todas' ? ` · ${filterCleanerG}` : ''}
+          {yearMode ? `Año ${currentYear}` : (filterMes.length === 0 ? 'Todo el historial' : (filterMes.length === 1 ? monthLabel(filterMes[0]) : `${filterMes.length} meses`))}
+          {filterSemanaG.length > 0 && !yearMode ? ` · ${filterSemanaG.length === 1 ? `Semana ${filterSemanaG[0]}` : `${filterSemanaG.length} semanas`}` : ''}
+          {filterCleanerG.length > 0 ? ` · ${filterCleanerG.length === 1 ? filterCleanerG[0] : `${filterCleanerG.length} cleaners`}` : ''}
         </div>
 
         {canSeePagos && (
@@ -2405,35 +2424,33 @@ function ScheduleModal({ onClose, onSave, existing, unitsList, cleanersList }) {
 function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, onDelete, allClients: allClientsProp, allCleaners: allCleanersProp }) {
   const allClientsCal = allClientsProp || UNITS;
   const allCleanersCal = allCleanersProp || CLEANERS;
-  const [filterMes, setFilterMes] = useState('todos');
-  const [filterSemana, setFilterSemana] = useState('todas');
-  const [filterCleanerCal, setFilterCleanerCal] = useState('todas');
-  const [filterCliente, setFilterCliente] = useState('todos');
+  const [filterMes, setFilterMes] = useState([]);
+  const [filterSemana, setFilterSemana] = useState([]);
+  const [filterCleanerCal, setFilterCleanerCal] = useState([]);
+  const [filterCliente, setFilterCliente] = useState([]);
 
-  // Devuelve el número de semana del mes (1-5) basado en el día de la fecha
   useEffect(() => {
-    if (filterMes === 'todos' && filterSemana !== 'todas') setFilterSemana('todas');
+    if (filterMes.length === 0 && filterSemana.length > 0) setFilterSemana([]);
   }, [filterMes, filterSemana]);
 
   function getWeekOfMonth(iso) {
     try {
-      const d = parseInt(iso.split('-')[2], 10);
-      return Math.ceil(d / 7); // 1-5
+      const d = parseInt((iso || '').split('-')[2], 10);
+      return Math.ceil(d / 7);
     } catch (e) { return 0; }
   }
 
   const sorted = [...schedule].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
   const availableMonths = [...new Set(sorted.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort();
 
-  // Si está filtrando por mes, calcular semanas disponibles de ese mes
-  const availableWeeks = filterMes === 'todos' ? [] :
-    [...new Set(sorted.filter((s) => (s.fecha || '').startsWith(filterMes)).map((s) => getWeekOfMonth(s.fecha)).filter(Boolean))].sort();
+  const availableWeeks = filterMes.length === 0 ? [] :
+    [...new Set(sorted.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m))).map((s) => getWeekOfMonth(s.fecha)).filter(Boolean))].sort();
 
   let list = sorted;
-  if (filterMes !== 'todos') list = list.filter((s) => (s.fecha || '').startsWith(filterMes));
-  if (filterSemana !== 'todas' && filterMes !== 'todos') list = list.filter((s) => getWeekOfMonth(s.fecha) === filterSemana);
-  if (filterCleanerCal !== 'todas') list = list.filter((s) => (s.cleaners || []).includes(filterCleanerCal));
-  if (filterCliente !== 'todos') list = list.filter((s) => s.unidad === filterCliente);
+  if (filterMes.length > 0) list = list.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m)));
+  if (filterSemana.length > 0 && filterMes.length > 0) list = list.filter((s) => filterSemana.includes(getWeekOfMonth(s.fecha)));
+  if (filterCleanerCal.length > 0) list = list.filter((s) => (s.cleaners || []).some((cl) => filterCleanerCal.includes(cl)));
+  if (filterCliente.length > 0) list = list.filter((s) => filterCliente.includes(s.unidad));
 
   // Agrupa por fecha
   const grouped = {};
@@ -2443,12 +2460,21 @@ function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, o
   });
 
   const todayStr = todayISO();
-  const chip = (label, val, current, setter) => (
-    <button onClick={() => setter(val)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-      style={{ background: current === val ? c.charcoal : c.paper, color: current === val ? c.paper : c.graytext, border: `1px solid ${current === val ? c.charcoal : c.divider}` }}>
-      {label}
-    </button>
-  );
+  // Multi-select chip: 'todos' limpia la selección; otros valores toggle
+  const chipMulti = (label, val, arr, setter) => {
+    const isAll = val === '__all__';
+    const active = isAll ? arr.length === 0 : arr.includes(val);
+    const onClick = () => {
+      if (isAll) setter([]);
+      else setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
+    };
+    return (
+      <button onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
+        style={{ background: active ? c.charcoal : c.paper, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.charcoal : c.divider}` }}>
+        {label}
+      </button>
+    );
+  };
 
   const fmtDate = (iso) => {
     try {
@@ -2472,31 +2498,31 @@ function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, o
         </div>
         {availableMonths.length > 0 && (
           <>
-            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes</div>
+            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes <span className="text-[9px] font-normal italic normal-case" style={{ color: c.graytext }}>(toca varios para combinar)</span></div>
             <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chip('Todos', 'todos', filterMes, setFilterMes)}
-              {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
+              {chipMulti('Todos', '__all__', filterMes, setFilterMes)}
+              {availableMonths.map((m) => chipMulti(fmtMonthKey(m), m, filterMes, setFilterMes))}
             </div>
           </>
         )}
-        {filterMes !== 'todos' && availableWeeks.length > 0 && (
+        {filterMes.length > 0 && availableWeeks.length > 0 && (
           <>
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Semana del mes</div>
             <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chip('Todas', 'todas', filterSemana, setFilterSemana)}
-              {availableWeeks.map((w) => chip(`Semana ${w}`, w, filterSemana, setFilterSemana))}
+              {chipMulti('Todas', '__all__', filterSemana, setFilterSemana)}
+              {availableWeeks.map((w) => chipMulti(`Semana ${w}`, w, filterSemana, setFilterSemana))}
             </div>
           </>
         )}
         <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cliente</div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chip('Todos', 'todos', filterCliente, setFilterCliente)}
-          {allClientsCal.map((u) => chip(u, u, filterCliente, setFilterCliente))}
+          {chipMulti('Todos', '__all__', filterCliente, setFilterCliente)}
+          {allClientsCal.map((u) => chipMulti(u, u, filterCliente, setFilterCliente))}
         </div>
         <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-          {chip('Todas', 'todas', filterCleanerCal, setFilterCleanerCal)}
-          {allCleanersCal.map((cl) => chip(cl, cl, filterCleanerCal, setFilterCleanerCal))}
+          {chipMulti('Todas', '__all__', filterCleanerCal, setFilterCleanerCal)}
+          {allCleanersCal.map((cl) => chipMulti(cl, cl, filterCleanerCal, setFilterCleanerCal))}
         </div>
       </div>
       <div className="px-6">
