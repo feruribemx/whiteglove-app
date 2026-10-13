@@ -1831,7 +1831,22 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
   const canSeeCobro = hasFullAccess(currentUser);
   const canSeePagos = canManagePagos(currentUser);
   const [filterMes, setFilterMes] = useState(currentMonthKey());
+  const [filterSemanaG, setFilterSemanaG] = useState('todas');
   const [filterCleanerG, setFilterCleanerG] = useState('todas');
+  const [showServiceList, setShowServiceList] = useState(false);
+
+  // Devuelve el número de semana del mes (1-5) basado en el día de la fecha
+  function getWeekOfMonth(iso) {
+    try {
+      const d = parseInt((iso || '').split('-')[2], 10);
+      return Math.ceil(d / 7);
+    } catch (e) { return 0; }
+  }
+
+  // Reset semana cuando cambia mes a vista anual
+  useEffect(() => {
+    if (filterMes === 'anio' && filterSemanaG !== 'todas') setFilterSemanaG('todas');
+  }, [filterMes, filterSemanaG]);
 
   // Base: cleaners solo ven lo suyo; admins todo
   const baseList = isCleaner
@@ -1843,11 +1858,29 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
   const curM = currentMonthKey();
   if (!availableMonths.includes(curM)) availableMonths.unshift(curM);
 
-  // Aplica filtros
-  let monthSvcs = baseList.filter((s) => (s.fecha || '').startsWith(filterMes));
+  // Aplica filtros — soporta año completo con filterMes === 'anio' + año actual
+  const currentYear = new Date().getFullYear().toString();
+  let monthSvcs;
+  if (filterMes === 'anio') {
+    monthSvcs = baseList.filter((s) => (s.fecha || '').startsWith(currentYear));
+  } else {
+    monthSvcs = baseList.filter((s) => (s.fecha || '').startsWith(filterMes));
+  }
+
+  // Semanas disponibles (solo cuando se filtra por un mes específico)
+  const availableWeeks = filterMes === 'anio' ? [] :
+    [...new Set(monthSvcs.map((s) => getWeekOfMonth(s.fecha)).filter(Boolean))].sort();
+
+  if (filterSemanaG !== 'todas' && filterMes !== 'anio') {
+    monthSvcs = monthSvcs.filter((s) => getWeekOfMonth(s.fecha) === filterSemanaG);
+  }
+
   if (!isCleaner && filterCleanerG !== 'todas') {
     monthSvcs = monthSvcs.filter((s) => cleanersOf(s).includes(filterCleanerG));
   }
+
+  // Lista de servicios ordenada (más reciente primero)
+  const periodServices = [...monthSvcs].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
 
   // Si el admin filtra por 1 cleaner, mostramos solo ese; si no, todos
   const cleanersToShow = (!isCleaner && filterCleanerG !== 'todas') ? [filterCleanerG] : allCleanersG;
@@ -1884,7 +1917,7 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
         <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.gold }}>{subtitle}</div>
         <h3 className="text-lg font-serif mt-0.5" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>{title}</h3>
       </div>
-      {empty ? <div className="py-8 text-center text-sm" style={{ color: c.graytext }}>Sin datos este mes</div> : children}
+      {empty ? <div className="py-8 text-center text-sm" style={{ color: c.graytext }}>Sin datos en este período</div> : children}
     </div>
   );
 
@@ -1892,10 +1925,20 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
     <div>
       <Header subtitle="Gráficas" currentUser={currentUser} onOpenMenu={onOpenMenu} />
       <div className="px-6 -mt-2 pb-4">
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes</div>
+        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Período</div>
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+          {chip(`Año ${currentYear}`, 'anio', filterMes, setFilterMes)}
           {availableMonths.map((m) => chip(fmtMonthKey(m), m, filterMes, setFilterMes))}
         </div>
+        {filterMes !== 'anio' && availableWeeks.length > 0 && (
+          <>
+            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Semana del mes</div>
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
+              {chip('Todas', 'todas', filterSemanaG, setFilterSemanaG)}
+              {availableWeeks.map((w) => chip(`Semana ${w}`, w, filterSemanaG, setFilterSemanaG))}
+            </div>
+          </>
+        )}
         {!isCleaner && (
           <>
             <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
@@ -1907,7 +1950,11 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
         )}
       </div>
       <div className="px-6">
-        <div className="text-sm mb-4 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>{monthLabel(filterMes)}{filterCleanerG !== 'todas' ? ` · ${filterCleanerG}` : ''}</div>
+        <div className="text-sm mb-4 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>
+          {filterMes === 'anio' ? `Año ${currentYear}` : monthLabel(filterMes)}
+          {filterSemanaG !== 'todas' && filterMes !== 'anio' ? ` · Semana ${filterSemanaG}` : ''}
+          {filterCleanerG !== 'todas' ? ` · ${filterCleanerG}` : ''}
+        </div>
 
         {canSeePagos && (
           <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
@@ -1917,7 +1964,7 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
             </div>
 
             {nomina.length === 0 ? (
-              <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este mes</div>
+              <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este período</div>
             ) : (
               <>
                 <div className="flex items-center px-2 pb-2" style={{ borderBottom: `1px solid ${c.divider}` }}>
@@ -1957,6 +2004,53 @@ function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleane
             )}
           </div>
         )}
+
+        <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.gold }}>SERVICIOS DEL PERÍODO</div>
+              <h3 className="text-lg font-serif mt-0.5" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>
+                {periodServices.length} {periodServices.length === 1 ? 'servicio' : 'servicios'}
+              </h3>
+            </div>
+            {periodServices.length > 0 && (
+              <button onClick={() => setShowServiceList(!showServiceList)}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{ background: showServiceList ? c.navy : c.cream, color: showServiceList ? c.paper : c.graytext, border: `1px solid ${showServiceList ? c.navy : c.divider}` }}>
+                {showServiceList ? 'Ocultar' : 'Ver lista'}
+              </button>
+            )}
+          </div>
+          {periodServices.length === 0 ? (
+            <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este período</div>
+          ) : showServiceList && (
+            <div>
+              {periodServices.map((s) => {
+                const cls = cleanersOf(s).join(', ');
+                const totalPago = getTotalPago(s);
+                return (
+                  <div key={s.id} className="flex items-center py-2.5" style={{ borderTop: `1px solid ${c.divider}` }}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-bold" style={{ color: c.navy }}>{s.fecha}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.cream, color: c.graytext }}>{s.tipo}</span>
+                        <span className="text-xs" style={{ color: c.graytext }}>· {s.horas}h</span>
+                      </div>
+                      <div className="text-sm font-semibold truncate" style={{ color: c.navy }}>{s.unidad}</div>
+                      <div className="text-[11px]" style={{ color: c.graytext }}>{cls}</div>
+                    </div>
+                    {canSeePagos && totalPago > 0 && (
+                      <div className="text-right flex-shrink-0 ml-2">
+                        <div className="text-sm font-bold font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>{fmtMoney(totalPago)}</div>
+                        {canSeeCobro && s.cobro != null && <div className="text-[10px]" style={{ color: c.graytext }}>cobro: {fmtMoney(s.cobro)}</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {canSeeCobro && <ChartCard title="Ingresos por cleaner" subtitle="ESTE MES" empty={byCleaner.every((r) => r.ingresos === 0)}>
           <ResponsiveContainer width="100%" height={180}>
