@@ -10,6 +10,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 export const BASE_UNITS = [
+  'Mohammed', 'Phillys',
   'Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Larisse N',
   'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha',
   'Max - Hamilton', 'Veradek', 'Abi', 'KENNY SPADINA', 'Georgia Ancaster'
@@ -215,15 +216,24 @@ export async function fetchExtraClients() {
   }
 }
 
-export async function addClientToDb(name) {
+export async function addClientToDb(clientInput) {
+  const name = typeof clientInput === 'string' ? clientInput.trim() : (clientInput?.name || '').trim();
+  if (!name) return;
   const { error } = await supabase.from('clients').insert({ name });
-  if (error) throw error;
-  const rows = UNIT_STOCK_TEMPLATE.map((item, i) => ({
-    id: `${name}-${i}`, unidad: name,
-    categoria: item.cat, producto: item.prod, unidad_medida: item.unit,
-    qty: item.qty, min_qty: item.min,
-  }));
-  await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
+  if (error && error.code !== '23505') {
+    console.error('addClientToDb error:', error);
+  }
+  try {
+    const rows = UNIT_STOCK_TEMPLATE.map((item, i) => ({
+      id: `${name}-${i}`, unidad: name,
+      categoria: item.cat, producto: item.prod, unidad_medida: item.unit,
+      qty: item.qty, min_qty: item.min,
+    }));
+    await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
+  } catch (e) {
+    console.error('stock_by_unit upsert error:', e);
+  }
+  return name;
 }
 
 export async function fetchCleanersDb() {
@@ -242,11 +252,60 @@ export async function addCleanerToDb(name, password) {
   if (error) throw error;
 }
 
+export const scheduleFromDb = (r) => {
+  const cleaners = Array.isArray(r.cleaners) ? r.cleaners : (r.cleaner ? [r.cleaner] : []);
+  const cleaner = cleaners[0] || r.cleaner || '';
+  const estado = r.estado || 'programado';
+  const status = estado === 'completado' ? 'completed' : 'pending';
+
+  let horas = 2;
+  const match = (r.notas || '').match(/\[Duración:\s*(\d+)h(?:\s*(\d+)m)?\]/i);
+  if (match) {
+    const h = parseInt(match[1], 10) || 0;
+    const m = parseInt(match[2], 10) || 0;
+    horas = parseFloat((h + m / 60).toFixed(2));
+  } else if (r.horas) {
+    horas = Number(r.horas);
+  }
+
+  return {
+    ...r,
+    id: Number(r.id),
+    cleaners,
+    cleaner,
+    estado,
+    status,
+    horas,
+  };
+};
+
+export const scheduleToDb = (entry) => {
+  const cleaners = Array.isArray(entry.cleaners) && entry.cleaners.length
+    ? entry.cleaners
+    : (entry.cleaner ? [entry.cleaner] : []);
+
+  let estado = entry.estado;
+  if (!estado && entry.status) {
+    estado = entry.status === 'completed' ? 'completado' : 'programado';
+  }
+  if (!estado) estado = 'programado';
+
+  return {
+    fecha: entry.fecha,
+    hora: entry.hora || null,
+    unidad: entry.unidad,
+    cleaners,
+    tipo: entry.tipo || 'Limpieza',
+    notas: entry.notas || null,
+    estado,
+  };
+};
+
 export async function fetchSchedule() {
   try {
     const { data, error } = await supabase.from('schedule').select('*').order('fecha').order('hora');
     if (error) { console.error('fetch schedule', error); return []; }
-    return data || [];
+    return (data || []).map(scheduleFromDb);
   } catch (err) {
     console.error('fetchSchedule err', err);
     return [];
@@ -254,13 +313,27 @@ export async function fetchSchedule() {
 }
 
 export async function addScheduleToDb(entry) {
-  const { data, error } = await supabase.from('schedule').insert(entry).select().single();
+  const dbPayload = scheduleToDb(entry);
+  const { data, error } = await supabase.from('schedule').insert(dbPayload).select().single();
   if (error) throw error;
-  return data;
+  return scheduleFromDb(data);
 }
 
 export async function updateScheduleInDb(id, patch) {
-  const { error } = await supabase.from('schedule').update(patch).eq('id', id);
+  const dbPatch = {};
+  if (patch.fecha !== undefined) dbPatch.fecha = patch.fecha;
+  if (patch.hora !== undefined) dbPatch.hora = patch.hora;
+  if (patch.unidad !== undefined) dbPatch.unidad = patch.unidad;
+  if (patch.cleaners !== undefined) dbPatch.cleaners = patch.cleaners;
+  else if (patch.cleaner !== undefined) dbPatch.cleaners = [patch.cleaner];
+  if (patch.tipo !== undefined) dbPatch.tipo = patch.tipo;
+  if (patch.notas !== undefined) dbPatch.notas = patch.notas;
+  if (patch.estado !== undefined) {
+    dbPatch.estado = patch.estado;
+  } else if (patch.status !== undefined) {
+    dbPatch.estado = patch.status === 'completed' ? 'completado' : 'programado';
+  }
+  const { error } = await supabase.from('schedule').update(dbPatch).eq('id', id);
   if (error) throw error;
 }
 

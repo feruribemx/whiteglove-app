@@ -8,6 +8,7 @@ export default function ServiceModal({
   onClose,
   serviceToEdit,
   onSave,
+  onAddClient,
   availableUnits,
   availableCleaners,
   rates,
@@ -39,6 +40,16 @@ export default function ServiceModal({
   const [pagosPorCleaner, setPagosPorCleaner] = useState({});
   const [capturista, setCapturista] = useState('');
   const [validationError, setValidationError] = useState('');
+
+  // New Client Modal State
+  const [showNewClientModal, setShowNewClientModal] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientType, setNewClientType] = useState('Limpieza');
+  const [newClientAddress, setNewClientAddress] = useState('');
+  const [newClientRate, setNewClientRate] = useState('');
+  const [newClientNotes, setNewClientNotes] = useState('');
+  const [newClientError, setNewClientError] = useState('');
+  const [isAddingClient, setIsAddingClient] = useState(false);
 
   // Calculate decimal hours from hours + minutes
   const computeDecimalHours = (h, m) => {
@@ -159,6 +170,49 @@ export default function ServiceModal({
     setPagosPorCleaner(nextPagos);
     const totalP = Object.values(nextPagos).reduce((s, v) => s + (Number(v) || 0), 0);
     setPagoCleaner(String(totalP));
+  };
+
+  const handleCreateNewClient = async (e) => {
+    e?.preventDefault?.();
+    const trimmed = newClientName.trim();
+    if (!trimmed) {
+      setNewClientError('Por favor ingresa el nombre del nuevo cliente o unidad.');
+      return;
+    }
+    setNewClientError('');
+    setIsAddingClient(true);
+    try {
+      if (onAddClient) {
+        await onAddClient(trimmed);
+      }
+      setUnidad(trimmed);
+      if (newClientType) setTipo(newClientType);
+      if (newClientRate && showFinancials && (!cobro || cobro === '')) {
+        setCobro(newClientRate);
+      }
+      setNewClientName('');
+      setNewClientAddress('');
+      setNewClientRate('');
+      setNewClientNotes('');
+      setShowNewClientModal(false);
+    } catch (err) {
+      console.error('Error adding client:', err);
+      setNewClientError('No se pudo registrar el cliente. Inténtalo de nuevo.');
+    } finally {
+      setIsAddingClient(false);
+    }
+  };
+
+  const handleQuickAddPredefined = async (clientPresetName) => {
+    try {
+      if (onAddClient) {
+        await onAddClient(clientPresetName);
+      }
+      setUnidad(clientPresetName);
+      setShowNewClientModal(false);
+    } catch (err) {
+      console.error('Error quick adding client:', err);
+    }
   };
 
   const handleSubmit = (e) => {
@@ -309,7 +363,21 @@ export default function ServiceModal({
 
           {/* Unit / Client */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Unidad / Cliente</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-slate-700">Unidad / Cliente</label>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewClientError('');
+                  setShowNewClientModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-[#0B1D4A] bg-[#FFB566]/25 hover:bg-[#FFB566]/40 border border-[#FFB566]/70 rounded-lg transition-all shadow-2xs cursor-pointer active:scale-98"
+                title="Registrar un nuevo cliente o residencia para capturar servicios"
+              >
+                <Plus className="w-3.5 h-3.5 text-[#0B1D4A] stroke-[3]" />
+                <span>+ Nuevo Cliente</span>
+              </button>
+            </div>
             <select
               value={unidad}
               onChange={(e) => setUnidad(e.target.value)}
@@ -577,6 +645,162 @@ export default function ServiceModal({
             </button>
           </div>
         </form>
+
+        {/* New Client Sub-dialog */}
+        {showNewClientModal && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in zoom-in-95">
+              <div className="px-6 py-4 bg-[#0B1D4A] text-white flex items-center justify-between">
+                <div>
+                  <span className="font-serif text-lg font-bold text-[#FAF7F1] block">
+                    Registrar Nuevo Cliente
+                  </span>
+                  <span className="text-[10px] text-slate-300 font-semibold uppercase tracking-wider">
+                    Datos para capturar servicio y nómina
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNewClientModal(false)}
+                  className="p-1 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Quick shortcuts for requested clients */}
+              {(!availableUnits.includes('Mohammed') || !availableUnits.includes('Phillys')) && (
+                <div className="bg-amber-50 px-6 py-2.5 border-b border-amber-200 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-amber-950">
+                    Sugerencia rápida:
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {!availableUnits.includes('Mohammed') && (
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAddPredefined('Mohammed')}
+                        className="text-[11px] font-bold bg-white text-[#0B1D4A] border border-amber-300 hover:bg-amber-100 px-2.5 py-1 rounded-lg shadow-2xs transition-all cursor-pointer"
+                      >
+                        + Mohammed
+                      </button>
+                    )}
+                    {!availableUnits.includes('Phillys') && (
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAddPredefined('Phillys')}
+                        className="text-[11px] font-bold bg-white text-[#0B1D4A] border border-amber-300 hover:bg-amber-100 px-2.5 py-1 rounded-lg shadow-2xs transition-all cursor-pointer"
+                      >
+                        + Phillys
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleCreateNewClient} className="p-6 space-y-4">
+                {newClientError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>{newClientError}</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nombre del Cliente o Propiedad <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="Ej: Mohammed, Phillys, Residencia Bloor..."
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] font-semibold"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Este nombre se guardará y seleccionará para capturar este servicio.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Tipo de Servicio Habitual
+                    </label>
+                    <select
+                      value={newClientType}
+                      onChange={(e) => setNewClientType(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
+                    >
+                      <option value="Limpieza">Limpieza Residencial</option>
+                      <option value="Airbnb">Airbnb / Renta Corta</option>
+                      <option value="Extra Task">Extra Task / Profunda</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Tarifa Estimada de Cobro ($)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ej: 140.00"
+                      value={newClientRate}
+                      onChange={(e) => setNewClientRate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] font-semibold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Dirección o Código de Acceso (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 150 King St W, Lockbox #4192..."
+                    value={newClientAddress}
+                    onChange={(e) => setNewClientAddress(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Instrucciones o Notas Especiales (Opcional)
+                  </label>
+                  <textarea
+                    rows="2"
+                    placeholder="Detalles sobre mascotas, productos preferidos o especificaciones..."
+                    value={newClientNotes}
+                    onChange={(e) => setNewClientNotes(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] resize-none"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewClientModal(false)}
+                    className="px-4 py-2 font-bold text-slate-600 hover:text-slate-800 rounded-xl text-xs"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isAddingClient}
+                    className="px-5 py-2 font-bold text-[#0B1D4A] bg-[#FFB566] hover:bg-[#E89A45] rounded-xl text-xs shadow-xs transition-all active:scale-98 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isAddingClient ? 'Guardando...' : '+ Guardar y Seleccionar Cliente'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

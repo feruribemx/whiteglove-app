@@ -9,10 +9,13 @@ export default function ScheduleView({
   onUpdateSchedule,
   onDeleteSchedule,
   onOpenNewService,
+  onAddClient,
   currentUser,
 }) {
   const [filter, setFilter] = useState('upcoming');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showAddClientInSchedule, setShowAddClientInSchedule] = useState(false);
+  const [newScheduleClient, setNewScheduleClient] = useState('');
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
   const [hora, setHora] = useState('09:00');
   const [duracionHoras, setDuracionHoras] = useState(2);
@@ -393,7 +396,49 @@ export default function ScheduleView({
 
               {/* Unit / Client */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Unidad / Residencia</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">Unidad / Residencia</label>
+                  {onAddClient && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddClientInSchedule(!showAddClientInSchedule)}
+                      className="text-[11px] font-bold text-[#0B1D4A] hover:text-[#1E3670] bg-[#FFB566]/20 border border-[#FFB566]/60 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                    >
+                      + Nuevo Cliente
+                    </button>
+                  )}
+                </div>
+
+                {showAddClientInSchedule && (
+                  <div className="mb-2 p-2.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-2">
+                    <span className="text-[11px] font-bold text-amber-950 block">Nombre del nuevo cliente / unidad:</span>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Ej: Mohammed o Phillys..."
+                        value={newScheduleClient}
+                        onChange={(e) => setNewScheduleClient(e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#0B1D4A]"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const trimmed = newScheduleClient.trim();
+                          if (trimmed) {
+                            await onAddClient(trimmed);
+                            setUnidad(trimmed);
+                            setNewScheduleClient('');
+                            setShowAddClientInSchedule(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-[#0B1D4A] text-[#FFB566] text-xs font-bold rounded-lg hover:bg-[#1E3670] cursor-pointer"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <select
                   value={unidad}
                   onChange={(e) => setUnidad(e.target.value)}
