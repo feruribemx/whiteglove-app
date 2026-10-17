@@ -1,3303 +1,558 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import Navbar from './components/Navbar';
+import StatsCards from './components/StatsCards';
+import ServicesList from './components/ServicesList';
+import ServiceModal from './components/ServiceModal';
+import InventoryView from './components/InventoryView';
+import ScheduleView from './components/ScheduleView';
+import PayrollView from './components/PayrollView';
+import AnalyticsView from './components/AnalyticsView';
+import AuditLogModal from './components/AuditLogModal';
+import LoginView from './components/LoginView';
+import LandingView from './components/LandingView';
+import Toast from './components/Toast';
+
 import {
-  Plus, Home, ClipboardList, BarChart3, Package, Trash2, X, Sparkles,
-  Clock, DollarSign, TrendingUp, AlertCircle, CheckCircle2,
-  Minus, ChevronRight, ChevronLeft, Warehouse, Building2, Eye, EyeOff, LogOut, User, Shield, ShieldCheck, ArrowLeft, Calendar, Menu, Settings
-} from 'lucide-react';
-import {
-  BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, LabelList
-} from 'recharts';
-import { createClient } from '@supabase/supabase-js';
-
-// ---------- Supabase ----------
-const SUPABASE_URL = 'https://mijeqjelqxdyrdfysndb.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pamVxamVscXhkeXJkZnlzbmRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0ODk3ODEsImV4cCI6MjEwNTA2NTc4MX0.-uDDOD8Z8XxTYY3H8W4woGHHxq-mu2kiPGcFIXrHsA4';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  realtime: { params: { eventsPerSecond: 10 } },
-});
-
-// Session storage stays local (auth is device-local)
-if (typeof window !== 'undefined') {
-  window.storage = window.storage || {
-    get: async (key) => { try { const v = localStorage.getItem(key); return v !== null ? { value: v } : null; } catch(e) { return null; } },
-    set: async (key, value) => { try { localStorage.setItem(key, value); return { value }; } catch(e) { return null; } },
-    delete: async (key) => { try { localStorage.removeItem(key); return { deleted: true }; } catch(e) { return null; } },
-  };
-}
-
-// ---------- DB transforms ----------
-const svcFromDb = (r) => ({
-  id: Number(r.id),
-  fecha: r.fecha,
-  unidad: r.unidad,
-  cleaners: r.cleaners || [],
-  cleaner: (r.cleaners || [])[0] || '',
-  horas: Number(r.horas),
-  tipo: r.tipo,
-  cobro: r.cobro !== null && r.cobro !== undefined ? Number(r.cobro) : null,
-  pagoCleaner: r.pago_cleaner !== null && r.pago_cleaner !== undefined ? Number(r.pago_cleaner) : null,
-  pagosPorCleaner: r.pagos_por_cleaner || null,
-  ratesPorCleaner: r.rates_por_cleaner || null,
-  pagoCleaningTeam: r.pago_cleaning_team !== null && r.pago_cleaning_team !== undefined ? Number(r.pago_cleaning_team) : null,
-  tip: r.tip !== null && r.tip !== undefined ? Number(r.tip) : null,
-  capturista: r.capturista || '',
-});
-const svcToDb = (s) => ({
-  id: s.id,
-  fecha: s.fecha,
-  unidad: s.unidad,
-  cleaners: s.cleaners && s.cleaners.length ? s.cleaners : (s.cleaner ? [s.cleaner] : []),
-  horas: s.horas,
-  tipo: s.tipo,
-  cobro: s.cobro,
-  pago_cleaner: s.pagoCleaner,
-  pagos_por_cleaner: s.pagosPorCleaner || null,
-  rates_por_cleaner: s.ratesPorCleaner || null,
-  pago_cleaning_team: s.pagoCleaningTeam != null ? s.pagoCleaningTeam : null,
-  tip: s.tip,
-  capturista: s.capturista || null,
-});
-const stockUnitFromDb = (r) => ({
-  id: r.id, cat: r.categoria, prod: r.producto, unit: r.unidad_medida,
-  qty: Number(r.qty), min: Number(r.min_qty),
-});
-const stockStorageFromDb = (r) => ({
-  id: Number(r.id), cat: r.categoria, prod: r.producto, unit: r.unidad_medida,
-  qty: Number(r.qty), min: Number(r.min_qty),
-});
-
-// Fetchers
-async function fetchAllServices() {
-  const { data, error } = await supabase.from('services').select('*').order('fecha', { ascending: false });
-  if (error) { console.error('fetch services', error); return []; }
-  return (data || []).map(svcFromDb);
-}
-async function fetchStockByUnit(UNITS_LIST, TEMPLATE) {
-  const { data, error } = await supabase.from('stock_by_unit').select('*');
-  if (error) { console.error('fetch stock_by_unit', error); return null; }
-  if (!data || data.length === 0) return null;
-  const grouped = {};
-  for (const row of data) {
-    if (!grouped[row.unidad]) grouped[row.unidad] = [];
-    grouped[row.unidad].push(stockUnitFromDb(row));
-  }
-  for (const u of UNITS_LIST) {
-    if (!grouped[u]) grouped[u] = TEMPLATE.map((it, i) => ({ ...it, id: `${u}-${i}` }));
-  }
-  return grouped;
-}
-async function fetchStockStorage() {
-  const { data, error } = await supabase.from('stock_storage').select('*');
-  if (error) { console.error('fetch stock_storage', error); return null; }
-  if (!data || data.length === 0) return null;
-  return data.map(stockStorageFromDb);
-}
-async function seedStockByUnit(UNITS_LIST, TEMPLATE) {
-  const rows = [];
-  for (const unidad of UNITS_LIST) {
-    TEMPLATE.forEach((item, i) => {
-      rows.push({
-        id: `${unidad}-${i}`, unidad,
-        categoria: item.cat, producto: item.prod, unidad_medida: item.unit,
-        qty: item.qty, min_qty: item.min,
-      });
-    });
-  }
-  const { error } = await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
-  if (error) console.error('seed stock_by_unit', error);
-}
-async function fetchRates() {
-  const { data, error } = await supabase.from('settings').select('*').eq('key', 'rates').maybeSingle();
-  if (error) { console.error('fetch rates', error); return DEFAULT_RATES; }
-  return data?.value || DEFAULT_RATES;
-}
-async function saveRates(rates) {
-  const { error } = await supabase.from('settings').upsert({ key: 'rates', value: rates, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-  if (error) console.error('save rates', error);
-}
-
-async function fetchExtraClients() {
-  const { data, error } = await supabase.from('clients').select('*').order('name');
-  if (error) { console.error('fetch clients', error); return []; }
-  return (data || []).map((r) => r.name);
-}
-
-async function fetchCleanersDb() {
-  const { data, error } = await supabase.from('cleaners_db').select('*').order('name');
-  if (error) { console.error('fetch cleaners_db', error); return []; }
-  return data || [];
-}
-
-async function addClientToDb(name) {
-  const { error } = await supabase.from('clients').insert({ name });
-  if (error) throw error;
-  const rows = UNIT_STOCK_TEMPLATE.map((item, i) => ({
-    id: `${name}-${i}`, unidad: name,
-    categoria: item.cat, producto: item.prod, unidad_medida: item.unit,
-    qty: item.qty, min_qty: item.min,
-  }));
-  await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
-}
-
-async function addCleanerToDb(name, password) {
-  const { error } = await supabase.from('cleaners_db').insert({ name, password });
-  if (error) throw error;
-}
-
-// ---------- Schedule ----------
-async function fetchSchedule() {
-  const { data, error } = await supabase.from('schedule').select('*').order('fecha').order('hora');
-  if (error) { console.error('fetch schedule', error); return []; }
-  return data || [];
-}
-async function addScheduleToDb(entry) {
-  const { data, error } = await supabase.from('schedule').insert(entry).select().single();
-  if (error) throw error;
-  return data;
-}
-async function updateScheduleInDb(id, patch) {
-  const { error } = await supabase.from('schedule').update(patch).eq('id', id);
-  if (error) throw error;
-}
-async function deleteScheduleFromDb(id) {
-  const { error } = await supabase.from('schedule').delete().eq('id', id);
-  if (error) throw error;
-}
-
-// ---------- Audit log ----------
-async function logAction(entry) {
-  const { error } = await supabase.from('audit_log').insert(entry);
-  if (error) console.error('audit log', error);
-}
-
-const svcSummary = (svc) => {
-  const cls = cleanersOf(svc).join(', ');
-  return `${svc.fecha} · ${svc.unidad} (${cls || 'sin cleaners'})`;
-};
-
-const diffService = (oldSvc, newSvc) => {
-  const changes = [];
-  const money = (v) => v != null && v !== '' && !isNaN(Number(v)) ? `$${Number(v).toFixed(0)}` : '—';
-  if (oldSvc.fecha !== newSvc.fecha) changes.push(`fecha ${oldSvc.fecha}→${newSvc.fecha}`);
-  if (oldSvc.unidad !== newSvc.unidad) changes.push(`cliente ${oldSvc.unidad}→${newSvc.unidad}`);
-  if (Number(oldSvc.horas) !== Number(newSvc.horas)) changes.push(`horas ${oldSvc.horas}h→${newSvc.horas}h`);
-  if (oldSvc.tipo !== newSvc.tipo) changes.push(`tipo ${oldSvc.tipo}→${newSvc.tipo}`);
-  if (Number(oldSvc.cobro || 0) !== Number(newSvc.cobro || 0)) changes.push(`cobro ${money(oldSvc.cobro)}→${money(newSvc.cobro)}`);
-  if (Number(oldSvc.pagoCleaningTeam || 0) !== Number(newSvc.pagoCleaningTeam || 0)) changes.push(`pago team ${money(oldSvc.pagoCleaningTeam)}→${money(newSvc.pagoCleaningTeam)}`);
-  if (Number(oldSvc.tip || 0) !== Number(newSvc.tip || 0)) changes.push(`tip ${money(oldSvc.tip)}→${money(newSvc.tip)}`);
-  const oldC = cleanersOf(oldSvc).join(',');
-  const newC = cleanersOf(newSvc).join(',');
-  if (oldC !== newC) changes.push(`cleaners [${oldC}]→[${newC}]`);
-  const oldP = oldSvc.pagosPorCleaner || {};
-  const newP = newSvc.pagosPorCleaner || {};
-  const allP = new Set([...Object.keys(oldP), ...Object.keys(newP)]);
-  allP.forEach((cl) => {
-    if (Number(oldP[cl] || 0) !== Number(newP[cl] || 0)) {
-      changes.push(`pago ${cl} ${money(oldP[cl])}→${money(newP[cl])}`);
-    }
-  });
-  if (oldSvc.capturista !== newSvc.capturista) changes.push(`capturista ${oldSvc.capturista||'—'}→${newSvc.capturista||'—'}`);
-  return changes;
-};
-
-async function seedStockStorage(items) {
-  const rows = items.map((item) => ({
-    id: item.id, categoria: item.cat, producto: item.prod,
-    unidad_medida: item.unit, qty: item.qty, min_qty: item.min,
-  }));
-  const { error } = await supabase.from('stock_storage').upsert(rows, { onConflict: 'id' });
-  if (error) console.error('seed stock_storage', error);
-}
-
-const LOGO_URI = 'data:image/webp;base64,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';
-
-const c = {
-  navy:       '#0B1D4A',
-  navyDeep:   '#061434',
-  navyLight:  '#1E3670',
-  apricot:    '#FFB566',
-  apricotSoft:'#FFE0B8',
-  apricotPale:'#FFF3E0',
-  cream:      '#FAF7F1',
-  paper:      '#FFFFFF',
-  blush:      '#E8B4B8',
-  blushSoft:  '#F7E8E9',
-  blushDeep:  '#D48B90',
-  // aliases para no romper referencias
-  gold:       '#FFB566',
-  goldDark:   '#E89A45',
-  goldSoft:   '#FFE0B8',
-  goldPale:   '#FFF3E0',
-  charcoal:   '#0B1D4A',
-  graytext:   '#6B6B7B',
-  divider:    '#E4E4EC',
-  sage:       '#7A9471',
-  sageLight:  '#E3EBDD',
-  terra:      '#C67B5C',
-  terraLight: '#F4E1D6',
-};
-
-const CLEANERS = ['Jazz', 'Karen', 'Kary', 'Ruben', 'Mafer', 'Maria', 'Nancy'];
-const UNITS = ['Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Larisse N',
-               'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha', 'Max - Hamilton',
-               'Veradek', 'Abi', 'KENNY SPADINA', 'Georgia Ancaster'];
-const HOURS = Array.from({ length: 25 }, (_, i) => 1 + i * 0.25);
-const TYPES = ['Limpieza', 'Extra Task'];
-const CAPTURISTAS = ['Fer Castil', 'Michelle Lopez', 'WhiteGlove'];
-
-const DEFAULT_RATES = {
-  'Limpieza':   { mode: 'hourly', amount: 18 },
-  'Extra Task': { mode: 'hourly', amount: 25 },
-};
-
-// Calcula el pago sugerido según tarifa configurada y duración
-function calcSuggestedPay(rates, tipo, horas) {
-  const r = rates?.[tipo];
-  if (!r || !r.amount) return 0;
-  if (r.mode === 'flat') return Number(r.amount);
-  return Number(r.amount) * (Number(horas) || 0);
-}
-
-const USERS = {
-  Fernandouribe: { password: 'bfgu1108.', displayName: 'Fernando Uribe' },
-  MichelleAdmin: { password: 'Romina1.',  displayName: 'Michelle López' },
-  FerCastil:     { password: 'Rocky1.',   displayName: 'Fer Castil' },
-};
-
-const initialsOf = (name) => (name || '').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-
-// Acceso financiero completo: solo Fernandouribe y MichelleAdmin.
-// FerCastil puede editar servicios (fecha, horas, cleaners, unidad, tipo) pero no ve ni modifica dinero.
-const hasFullAccess = (u) => u?.role === 'admin' && u?.username !== 'FerCastil';
-// Puede ver y modificar pagos (al cleaning team, a cleaner individual, tip). FerCastil SÍ puede.
-const canManagePagos = (u) => u?.role === 'admin';
-
-const UNIT_STOCK_TEMPLATE = [
-  { cat: 'Químicos',     prod: 'Multiusos',              unit: 'botellas', qty: 2, min: 1 },
-  { cat: 'Químicos',     prod: 'Desinfectante baños',    unit: 'botellas', qty: 1, min: 1 },
-  { cat: 'Químicos',     prod: 'Limpiavidrios',          unit: 'botellas', qty: 1, min: 1 },
-  { cat: 'Químicos',     prod: 'Cloro',                  unit: 'litros',   qty: 1, min: 1 },
-  { cat: 'Consumibles',  prod: 'Papel higiénico',        unit: 'rollos',   qty: 4, min: 2 },
-  { cat: 'Consumibles',  prod: 'Papel de cocina',        unit: 'rollos',   qty: 2, min: 1 },
-  { cat: 'Consumibles',  prod: 'Bolsas basura chicas',   unit: 'paquetes', qty: 1, min: 1 },
-  { cat: 'Consumibles',  prod: 'Bolsas basura grandes',  unit: 'paquetes', qty: 1, min: 1 },
-  { cat: 'Blancos',      prod: 'Toallas de manos',       unit: 'piezas',   qty: 2, min: 2 },
-  { cat: 'Blancos',      prod: 'Trapos microfibra',      unit: 'piezas',   qty: 3, min: 2 },
-  { cat: 'Herramientas', prod: 'Esponjas',               unit: 'piezas',   qty: 2, min: 1 },
-  { cat: 'Herramientas', prod: 'Guantes',                unit: 'pares',    qty: 2, min: 1 },
-];
-
-const INITIAL_STOCK_BY_UNIT = UNITS.reduce((acc, u) => {
-  acc[u] = UNIT_STOCK_TEMPLATE.map((it, i) => ({ ...it, id: `${u}-${i}` }));
-  return acc;
-}, {});
-
-const INITIAL_STOCK_STORAGE = [
-  { id: 1,  cat: 'Químicos',    prod: 'Multiusos (galón)',       unit: 'galones', qty: 2,  min: 1 },
-  { id: 2,  cat: 'Químicos',    prod: 'Desinfectante (galón)',   unit: 'galones', qty: 1,  min: 1 },
-  { id: 3,  cat: 'Químicos',    prod: 'Cloro (galón)',           unit: 'galones', qty: 2,  min: 1 },
-  { id: 4,  cat: 'Químicos',    prod: 'Aromatizante',            unit: 'botellas',qty: 6,  min: 3 },
-  { id: 5,  cat: 'Consumibles', prod: 'Papel higiénico (paca)',  unit: 'pacas',   qty: 2,  min: 1 },
-  { id: 6,  cat: 'Consumibles', prod: 'Papel de cocina (paca)',  unit: 'pacas',   qty: 1,  min: 1 },
-  { id: 7,  cat: 'Consumibles', prod: 'Bolsas basura (caja)',    unit: 'cajas',   qty: 2,  min: 1 },
-  { id: 8,  cat: 'Blancos',     prod: 'Toallas (repuesto)',      unit: 'piezas',  qty: 20, min: 10 },
-  { id: 9,  cat: 'Blancos',     prod: 'Trapos microfibra (rep.)',unit: 'piezas',  qty: 30, min: 15 },
-  { id: 10, cat: 'Herramientas',prod: 'Guantes (caja)',          unit: 'cajas',   qty: 2,  min: 1 },
-  { id: 11, cat: 'Herramientas',prod: 'Esponjas (paquete)',      unit: 'paquetes',qty: 3,  min: 2 },
-  { id: 12, cat: 'Herramientas',prod: 'Escobas / Trapeadores',   unit: 'piezas',  qty: 3,  min: 2 },
-];
-
-const fmtMoney = (n) => `$${(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-const fmtDate = (iso) => {
-  if (!iso) return '';
-  const d = new Date(iso + 'T12:00:00');
-  return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
-};
-const todayISO = () => new Date().toISOString().split('T')[0];
-const currentMonthKey = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-};
-const monthLabel = (key) => {
-  const [y, m] = key.split('-').map(Number);
-  const d = new Date(y, m - 1, 1);
-  return d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
-};
-const inMonth = (iso, monthKey) => iso && iso.startsWith(monthKey);
-const monthShortLabels = { '01': 'Ene', '02': 'Feb', '03': 'Mar', '04': 'Abr', '05': 'May', '06': 'Jun', '07': 'Jul', '08': 'Ago', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dic' };
-const fmtMonthKey = (key) => {
-  if (!key) return '';
-  const [y, m] = key.split('-');
-  return `${monthShortLabels[m] || m} ${y}`;
-};
-const countLow = (items) => items.filter((i) => i.qty < i.min).length;
-
-// Devuelve el array de cleaners de un servicio (compatible con formato viejo)
-const cleanersOf = (svc) => {
-  if (Array.isArray(svc.cleaners) && svc.cleaners.length) return svc.cleaners;
-  if (svc.cleaner) return [svc.cleaner];
-  return [];
-};
-
-// Pago que le corresponde a UN cleaner específico en un servicio
-const getPagoDeCleaner = (svc, cleaner) => {
-  if (svc.pagosPorCleaner && svc.pagosPorCleaner[cleaner] != null) {
-    return Number(svc.pagosPorCleaner[cleaner]) || 0;
-  }
-  // Fallback: formato viejo con pagoCleaner único → dividir entre cleaners
-  if (svc.pagoCleaner != null) {
-    const n = cleanersOf(svc).length;
-    return n > 0 ? Number(svc.pagoCleaner) / n : 0;
-  }
-  return 0;
-};
-
-// Suma total de pagos a cleaners en un servicio
-const getTotalPago = (svc) => {
-  if (svc.pagosPorCleaner) {
-    return Object.values(svc.pagosPorCleaner).reduce((s, v) => s + (Number(v) || 0), 0);
-  }
-  return Number(svc.pagoCleaner) || 0;
-};
-
-// Costo real del servicio para el negocio:
-// Si hay pago a cleaning team, ese es el costo (los pagos individuales están incluidos ahí).
-// Si no hay, el costo son los pagos individuales a cleaners.
-const calcCostoServicio = (svc) => {
-  const team = Number(svc.pagoCleaningTeam) || 0;
-  if (team > 0) return team;
-  return getTotalPago(svc);
-};
-
-// Ganancia total de un cleaner en un servicio (pago + porción del tip)
-const getGananciaDeCleaner = (svc, cleaner) => {
-  const pago = getPagoDeCleaner(svc, cleaner);
-  const n = cleanersOf(svc).length;
-  const tipShare = n > 0 ? (Number(svc.tip) || 0) / n : 0;
-  return pago + tipShare;
-};
-
-// ---------- Date period helpers ----------
-const toISODate = (d) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-};
-const getPeriodRange = (period, refDate = new Date()) => {
-  const d = new Date(refDate);
-  if (period === 'week') {
-    // Semana: lunes a domingo
-    const day = d.getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
-    const diff = day === 0 ? 6 : day - 1;
-    const start = new Date(d); start.setDate(d.getDate() - diff); start.setHours(0,0,0,0);
-    const end = new Date(start); end.setDate(start.getDate() + 6);
-    return { start: toISODate(start), end: toISODate(end) };
-  }
-  if (period === 'quincena') {
-    const day = d.getDate();
-    if (day <= 15) {
-      return {
-        start: toISODate(new Date(d.getFullYear(), d.getMonth(), 1)),
-        end:   toISODate(new Date(d.getFullYear(), d.getMonth(), 15)),
-      };
-    }
-    return {
-      start: toISODate(new Date(d.getFullYear(), d.getMonth(), 16)),
-      end:   toISODate(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
-    };
-  }
-  // month
-  return {
-    start: toISODate(new Date(d.getFullYear(), d.getMonth(), 1)),
-    end:   toISODate(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
-  };
-};
-const inRange = (iso, r) => iso && iso >= r.start && iso <= r.end;
-const periodLabel = (period, r) => {
-  const fmt = (iso) => {
-    const [, m, d] = iso.split('-');
-    const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-    return `${parseInt(d,10)} ${months[parseInt(m,10)-1]}`;
-  };
-  return `${fmt(r.start)} — ${fmt(r.end)}`;
-};
-
-function BrandHeader() {
-  return (
-    <>
-      <div className="flex justify-center mb-6">
-        <img src={LOGO_URI} alt="WhiteGlove" className="w-24 h-24 rounded-full object-cover" style={{ boxShadow: '0 8px 32px rgba(11,29,74,0.2)' }} />
-      </div>
-      <div className="text-center mb-6">
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <div className="h-px w-6" style={{ background: c.apricot }} />
-          <span className="text-xs tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>WHITEGLOVE</span>
-          <div className="h-px w-6" style={{ background: c.apricot }} />
-        </div>
-      </div>
-    </>
-  );
-}
-
-function HistorialModal({ onClose }) {
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase.from('audit_log').select('*').order('ts', { ascending: false }).limit(200);
-      if (!error) setLogs(data || []);
-      setLoading(false);
-    })();
-  }, []);
-
-  const relativeTime = (ts) => {
-    const diff = (Date.now() - new Date(ts).getTime()) / 1000;
-    if (diff < 60) return 'hace un momento';
-    if (diff < 3600) return `hace ${Math.floor(diff / 60)} min`;
-    if (diff < 86400) return `hace ${Math.floor(diff / 3600)} h`;
-    if (diff < 86400 * 7) return `hace ${Math.floor(diff / 86400)} días`;
-    try { return new Date(ts).toLocaleDateString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch(e) { return ts; }
-  };
-
-  const actionBadge = (a) => {
-    if (a === 'created') return { icon: '+', color: c.sage, label: 'CREÓ' };
-    if (a === 'updated') return { icon: '✎', color: c.gold, label: 'EDITÓ' };
-    if (a === 'deleted') return { icon: '×', color: c.terra, label: 'ELIMINÓ' };
-    return { icon: '•', color: c.graytext, label: a.toUpperCase() };
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <ClipboardList size={12} style={{ color: c.apricot }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>HISTORIAL</span>
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Modificaciones</h2>
-            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Últimos 200 cambios en la nube.</p>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-            <X size={16} style={{ color: c.navy }} />
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="py-12 text-center text-sm" style={{ color: c.graytext }}>Cargando...</div>
-        ) : logs.length === 0 ? (
-          <div className="py-12 text-center text-sm" style={{ color: c.graytext }}>Aún no hay historial — los cambios futuros se irán guardando aquí.</div>
-        ) : (
-          <div>
-            {logs.map((log) => {
-              const badge = actionBadge(log.action);
-              return (
-                <div key={log.id} className="rounded-2xl p-3 mb-2" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold" style={{ background: badge.color, color: c.paper }}>
-                      {badge.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold" style={{ color: c.navy }}>{log.user_name}</span>
-                        <span className="text-[9px] font-bold tracking-wider" style={{ color: badge.color }}>{badge.label}</span>
-                        <span className="text-[10px]" style={{ color: c.graytext }}>· {relativeTime(log.ts)}</span>
-                      </div>
-                      <div className="text-xs mt-1" style={{ color: c.charcoal, wordBreak: 'break-word', lineHeight: 1.5 }}>{log.summary}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AddClientModal({ onClose, onSave, existingClients }) {
-  const [name, setName] = useState('');
-  const trimmed = name.trim();
-  const alreadyExists = existingClients.some((cc) => cc.toLowerCase() === trimmed.toLowerCase());
-  const canSave = trimmed.length > 0 && !alreadyExists;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Building2 size={12} style={{ color: c.apricot }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>NUEVO CLIENTE</span>
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Agregar cliente</h2>
-            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Se sincroniza en la nube para todos los administradores.</p>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-            <X size={16} style={{ color: c.navy }} />
-          </button>
-        </div>
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Nombre del cliente / unidad</div>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Tomas Downtown" autoFocus
-            className="w-full px-4 py-3 rounded-2xl outline-none" style={{ background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
-          {alreadyExists && <div className="text-xs mt-2" style={{ color: c.terra }}>Este cliente ya existe.</div>}
-        </div>
-        <button onClick={() => { onSave(trimmed); onClose(); }} disabled={!canSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide"
-          style={{ background: canSave ? c.navy : c.divider, color: canSave ? c.paper : c.graytext }}>
-          GUARDAR CLIENTE
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function AddCleanerModal({ onClose, onSave, existingCleaners }) {
-  const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
-  const trimmedName = name.trim();
-  const trimmedPass = password.trim();
-  const alreadyExists = existingCleaners.some((cc) => cc.toLowerCase() === trimmedName.toLowerCase());
-  const canSave = trimmedName.length > 0 && trimmedPass.length >= 3 && !alreadyExists;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <User size={12} style={{ color: c.apricot }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>NUEVA CLEANER</span>
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Agregar cleaner</h2>
-            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Se registra con contraseña básica para su login.</p>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-            <X size={16} style={{ color: c.navy }} />
-          </button>
-        </div>
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Nombre</div>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Lucia" autoFocus
-            className="w-full px-4 py-3 rounded-2xl outline-none" style={{ background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
-          {alreadyExists && <div className="text-xs mt-2" style={{ color: c.terra }}>Esta cleaner ya existe.</div>}
-        </div>
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Contraseña (mín. 3 caracteres)</div>
-          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Ej: lucia123"
-            className="w-full px-4 py-3 rounded-2xl outline-none" style={{ background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
-          <div className="text-[11px] mt-2" style={{ color: c.graytext }}>Comparte esta contraseña con la cleaner para su login.</div>
-        </div>
-        <button onClick={() => { onSave(trimmedName, trimmedPass); onClose(); }} disabled={!canSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide"
-          style={{ background: canSave ? c.navy : c.divider, color: canSave ? c.paper : c.graytext }}>
-          GUARDAR CLEANER
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SettingsModal({ initialRates, onClose, onSave }) {
-  const [rates, setRates] = useState(initialRates || DEFAULT_RATES);
-
-  function updateType(tipo, patch) {
-    setRates({ ...rates, [tipo]: { ...rates[tipo], ...patch } });
-  }
-
-  function handleSave() {
-    onSave(rates);
-    onClose();
-  }
-
-  const inputStyle = { background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 };
-
-  const modePill = (tipo, mode, label) => {
-    const active = rates[tipo]?.mode === mode;
-    return (
-      <button
-        onClick={() => updateType(tipo, { mode })}
-        className="flex-1 px-4 py-2 rounded-full text-sm font-medium"
-        style={{ background: active ? c.gold : c.cream, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.gold : c.divider}` }}
-      >
-        {label}
-      </button>
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles size={12} style={{ color: c.apricot }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>ADMIN</span>
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Tarifas de pago</h2>
-            <p className="text-[11px] italic mt-1" style={{ color: c.graytext }}>Se aplican automáticamente al registrar servicios.</p>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-            <X size={16} style={{ color: c.navy }} />
-          </button>
-        </div>
-
-        {TYPES.map((tipo) => {
-          const r = rates[tipo] || { mode: 'hourly', amount: 0 };
-          return (
-            <div key={tipo} className="rounded-2xl p-4 mb-3" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
-              <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.apricot }}>{tipo}</div>
-              <div className="flex gap-2 mb-3">
-                {modePill(tipo, 'hourly', 'Por hora')}
-                {modePill(tipo, 'flat', 'Por servicio')}
-              </div>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={r.amount}
-                  onChange={(e) => updateType(tipo, { amount: parseFloat(e.target.value) || 0 })}
-                  className="w-full pl-9 pr-16 py-3 rounded-2xl outline-none"
-                  style={{ ...inputStyle, background: c.paper }}
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs" style={{ color: c.graytext }}>
-                  CAD {r.mode === 'hourly' ? '/ hora' : '/ servicio'}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-
-        <button onClick={handleSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide mt-2" style={{ background: c.navy, color: c.paper }}>
-          GUARDAR TARIFAS
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
-const REVIEWS = [
-  { name: 'Alexei', location: 'Toronto, ON', text_en: 'WhiteGlove transformed my Airbnb turnovers. My guests consistently mention how spotless the space feels. The attention to detail is unmatched.', text_es: 'WhiteGlove transformó mis turnovers de Airbnb. Mis huéspedes constantemente mencionan lo impecable que se siente el espacio. La atención al detalle es inigualable.', rating: 5 },
-  { name: 'Mandy D.', location: 'Markham, ON', text_en: 'Reliable, professional, and detail-oriented. I never worry about my property between bookings — WhiteGlove has it covered.', text_es: 'Confiables, profesionales y meticulosos. Nunca me preocupo por mi propiedad entre reservas — WhiteGlove lo tiene todo bajo control.', rating: 5 },
-  { name: 'Rohan', location: 'Downtown Toronto', text_en: 'The team manages all three of my units with incredible consistency. Communication is clear, service is impeccable.', text_es: 'El equipo maneja mis tres unidades con una consistencia increíble. La comunicación es clara y el servicio impecable.', rating: 5 },
-  { name: 'Saadman', location: 'Mississauga, ON', text_en: 'Deep clean service was outstanding. Found that premium touch other companies promise but never deliver.', text_es: 'El servicio de limpieza profunda fue excepcional. Encontré ese toque premium que otras compañías prometen pero nunca entregan.', rating: 5 },
-  { name: 'Max', location: 'Hamilton, ON', text_en: 'Been working with WhiteGlove for months. Their checklists and property reports make managing from a distance effortless.', text_es: 'He trabajado con WhiteGlove por meses. Sus checklists y reportes de propiedad hacen que administrar a distancia sea sencillo.', rating: 5 },
-  { name: 'Larisse', location: 'Yorkville, Toronto', text_en: 'Michelle and her team are incredible. They treat my home like it was their own. Highly recommend.', text_es: 'Michelle y su equipo son increíbles. Tratan mi casa como si fuera suya. Altamente recomendados.', rating: 5 },
-];
-
-// ===== LANDING PAGE DATA =====
-
-// Imágenes de Unsplash (gratuitas, uso comercial). Reemplaza con tus propias fotos cambiando estas URLs:
-const LANDING_IMAGES = {
-  hero: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1600&q=80&auto=format&fit=crop',
-  about: 'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=1200&q=80&auto=format&fit=crop',
-  // CN Tower, Toronto
-  toronto: 'https://images.unsplash.com/photo-1517935706615-2717063c2225?w=800&q=80&auto=format&fit=crop',
-  // Space Needle, Seattle
-  seattle: 'https://images.unsplash.com/photo-1438401171849-74ac270044ee?w=800&q=80&auto=format&fit=crop',
-  // Catedral de Guadalajara
-  guadalajara: 'https://images.unsplash.com/photo-1568402102990-bc541580b59f?w=800&q=80&auto=format&fit=crop',
-  contact: 'https://images.unsplash.com/photo-1527515637462-cff94eecc1ac?w=1600&q=80&auto=format&fit=crop',
-};
-
-// WhatsApp del servicio al cliente de WhiteGlove
-const WHATSAPP_NUMBER = '14168840601';
-const whatsappLink = (msg) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
-
-const TRANSLATIONS = {
-  es: {
-    nav: { login: 'Iniciar sesión', langToggle: 'EN' },
-    whatsapp: { msg: '¡Hola! Me gustaría pedir una cotización para servicio de limpieza con WhiteGlove.' },
-    hero: {
-      tag: 'LIMPIEZA PROFESIONAL · CUIDADO EXCEPCIONAL',
-      headline: 'Espacios excepcionales. Cuidado excepcional.',
-      subhead: 'Limpieza profesional y cuidado de propiedades, entregados con precisión, consistencia y un toque personal.',
-      regions: 'Con orgullo sirviendo Canadá, Estados Unidos y México.',
-      cta: 'Pedir cotización',
-    },
-    about: {
-      overline: 'Nosotros',
-      title: 'Más que limpio. Un estándar más alto.',
-      p1: 'En WhiteGlove Professional Services, creemos que el servicio excepcional se encuentra en los detalles.',
-      p2: 'Fundada en Toronto, Canadá, hemos crecido para convertirnos en una empresa internacional de limpieza y cuidado de propiedades que atiende hogares, negocios y propiedades de renta en toda Norteamérica.',
-      p3: 'Construida sobre la confianza, impulsada por la calidad y comprometida con hacer que cada espacio se sienta en su mejor estado.',
-    },
-    mission: { overline: 'Misión', title: 'Nuestra misión', text: 'Entregar limpieza y cuidado de propiedades excepcional a través de servicio confiable, atención al detalle y relaciones duraderas construidas sobre la confianza.' },
-    vision: { overline: 'Visión', title: 'Nuestra visión', text: 'Establecer un estándar más alto para la limpieza profesional en toda Norteamérica, combinando crecimiento internacional con cuidado personalizado y experiencias excepcionales al cliente.' },
-    services: {
-      overline: 'Nuestros servicios',
-      title: 'Lo que hacemos',
-      items: [
-        { title: 'Limpieza residencial', tagline: 'Un hogar más limpio. Un mejor estilo de vida.', desc: 'Soluciones de limpieza profesional diseñadas para mantener tu hogar fresco, cómodo y hermosamente mantenido. Disponible como servicio único, semanal, quincenal o mensual.' },
-        { title: 'Airbnb y rentas cortas', tagline: 'Turnos impecables. Experiencias excepcionales.', desc: 'Limpieza confiable y preparación de la propiedad entre estancias de huéspedes, incluyendo cambio de blancos, reabastecimiento, verificación de inventario y checklists personalizados.' },
-        { title: 'Limpieza profunda', tagline: 'Una limpieza más profunda. Un nuevo comienzo.', desc: 'Limpieza detallada que va más allá del mantenimiento diario, enfocándose en áreas que necesitan atención y cuidado extra.' },
-        { title: 'Mudanza (entrada / salida)', tagline: 'Mudarse hecho más fácil.', desc: 'Servicios de limpieza integral para preparar propiedades para nuevos residentes o asegurar una transición suave después de mudarse.' },
-        { title: 'Oficinas y comercial', tagline: 'Espacios limpios. Lugares productivos.', desc: 'Soluciones de limpieza profesional para oficinas, lugares de trabajo y propiedades comerciales, adaptadas a las necesidades de tu negocio.' },
-        { title: 'Tiendas retail', tagline: 'Cada detalle refleja tu marca.', desc: 'Limpieza especializada para tiendas, boutiques y showrooms, asegurando espacios acogedores y profesionalmente mantenidos.' },
-        { title: 'Housekeeping recurrente', tagline: 'Cuidado consistente para la vida diaria.', desc: 'Servicios de housekeeping personalizados para familias y profesionales ocupados que valoran la comodidad, organización y soporte continuo confiable.' },
-      ],
-    },
-    additional: {
-      overline: 'Más servicios',
-      title: 'Cuidado adicional de propiedad',
-      intro: 'Más allá de la limpieza tradicional, WhiteGlove ofrece servicios adicionales para apoyar a propietarios, anfitriones de Airbnb y property managers.',
-      items: [
-        { title: 'Gestión de inventario', desc: 'Monitoreo y reposición de suministros esenciales del hogar y para huéspedes.' },
-        { title: 'Blancos y lavandería', desc: 'Lavado, reemplazo y organización de toallas y ropa de cama.' },
-        { title: 'Reportes de propiedad', desc: 'Observaciones, actualizaciones fotográficas y reportes de la condición.' },
-        { title: 'Checklists personalizados', desc: 'Procedimientos de limpieza específicos por propiedad para calidad consistente.' },
-        { title: 'Coordinación de turnos', desc: 'Programación y preparación entre check-outs y check-ins.' },
-        { title: 'Coordinación de compras', desc: 'Asistencia con la compra y gestión de suministros esenciales.' },
-      ],
-      note: '*Los servicios adicionales están sujetos a disponibilidad y requerimientos de cada propiedad.',
-    },
-    why: {
-      overline: 'Por qué elegirnos',
-      title: 'La diferencia WhiteGlove',
-      items: [
-        { title: 'Confiables', desc: 'Servicio profesional construido sobre la confianza, responsabilidad y consistencia.' },
-        { title: 'Atención al detalle', desc: 'Creemos que los detalles más pequeños hacen la diferencia más grande.' },
-        { title: 'Servicio personalizado', desc: 'Cada propiedad es única. Nuestras soluciones se diseñan alrededor de tus necesidades.' },
-        { title: 'Comunicación clara', desc: 'Comunicación transparente y responsiva durante todo el servicio.' },
-        { title: 'Equipo profesional', desc: 'Profesionales coordinados comprometidos con altos estándares de servicio.' },
-        { title: 'Agenda flexible', desc: 'Opciones convenientes de servicio único y recurrente adaptadas a tu rutina.' },
-      ],
-    },
-    areas: {
-      overline: 'Áreas de servicio',
-      title: 'Dónde operamos',
-      canada: { country: 'Canadá', city1: 'Toronto y GTA', regions1: 'Downtown · Yorkville · Yonge & Eglinton · St. Lawrence · Moss Park · Scarborough · Mississauga · Oakville · Burlington · Richmond Hill · Markham · comunidades aledañas', city2: 'Hamilton', regions2: 'Downtown Hamilton · Ancaster · comunidades aledañas' },
-      usa: { country: 'Estados Unidos', city1: 'Seattle · Washington', regions1: 'Seattle · comunidades aledañas (sujeto a disponibilidad)' },
-      mexico: { country: 'México', city1: 'Guadalajara · Jalisco', regions1: 'Guadalajara · Zapopan · áreas seleccionadas dentro de la Zona Metropolitana' },
-      note: '*La disponibilidad puede variar según la ubicación.',
-    },
-    values: {
-      overline: 'Valores',
-      title: 'Nuestros valores',
-      items: [
-        { title: 'Confianza', desc: 'Construyendo relaciones duraderas a través de la confiabilidad e integridad.' },
-        { title: 'Transparencia', desc: 'Comunicación honesta y expectativas claras.' },
-        { title: 'Excelencia', desc: 'Manteniendo altos estándares de calidad en cada servicio.' },
-        { title: 'Compromiso', desc: 'Tomando responsabilidad por cada propiedad confiada a nuestro cuidado.' },
-        { title: 'Respeto', desc: 'Valorando a nuestros clientes, miembros del equipo y sus espacios.' },
-        { title: 'Consistencia', desc: 'Entregando servicio confiable en cada ubicación.' },
-      ],
-    },
-    how: {
-      overline: 'Cómo funciona',
-      title: 'Cómo funciona',
-      items: [
-        { num: '1', title: 'Contáctanos', desc: 'Cuéntanos sobre tu propiedad y el servicio de limpieza que necesitas.' },
-        { num: '2', title: 'Recibe tu cotización', desc: 'Prepararemos una estimación personalizada basada en tus requerimientos.' },
-        { num: '3', title: 'Agenda tu servicio', desc: 'Elige una fecha y hora conveniente según disponibilidad.' },
-        { num: '4', title: 'Disfruta la experiencia', desc: 'Nuestro equipo se encarga de los detalles mientras tú disfrutas la tranquilidad.' },
-      ],
-    },
-    testimonials: {
-      overline: 'Lo que dicen de nosotros',
-      title: 'Historias que nos enorgullecen',
-      subtitle: 'La confianza se construye un espacio a la vez. Esto es lo que nuestros clientes dicen de WhiteGlove.',
-    },
-    contact: {
-      overline: 'Contacto',
-      title: 'Tu espacio merece el toque WhiteGlove.',
-      subtitle: 'Ya sea tu hogar, tu negocio o tu propiedad de renta, estamos aquí para hacer que el cuidado excepcional se sienta sin esfuerzo.',
-      cta: 'Pedir cotización gratis',
-      ctaWeb: 'Visitar sitio web',
-      serving: 'Sirviendo Canadá, Estados Unidos y México.',
-    },
-    footer: {
-      tag: 'Limpieza profesional. Cuidado excepcional.',
-      canada: 'Canadá: Toronto & GTA · Hamilton',
-      usa: 'EE.UU.: Seattle, Washington',
-      mexico: 'México: Guadalajara, Jalisco',
-      services: 'Residencial · Airbnb · Limpieza profunda · Mudanzas · Comercial · Retail · Housekeeping',
-      rights: '© 2026 WhiteGlove Professional Services. Todos los derechos reservados.',
-    },
-  },
-  en: {
-    nav: { login: 'Login', langToggle: 'ES' },
-    whatsapp: { msg: "Hi! I'd like to request a quote for cleaning services with WhiteGlove." },
-    hero: {
-      tag: 'PROFESSIONAL CLEANING · EXCEPTIONAL CARE',
-      headline: 'Exceptional Spaces. Exceptional Care.',
-      subhead: 'Professional cleaning and property care, delivered with precision, consistency, and a personal touch.',
-      regions: 'Proudly serving Canada, the United States, and Mexico.',
-      cta: 'Request a quote',
-    },
-    about: {
-      overline: 'About us',
-      title: 'More Than Clean. A Higher Standard.',
-      p1: 'At WhiteGlove Professional Services, we believe exceptional service is found in the details.',
-      p2: "Founded in Toronto, Canada, we've grown into an international cleaning and property care company serving homes, businesses, and rental properties across North America.",
-      p3: 'Built on trust, driven by quality, and committed to making every space feel its best.',
-    },
-    mission: { overline: 'Mission', title: 'Our mission', text: 'To deliver exceptional cleaning and property care through reliable service, attention to detail, and long-lasting relationships built on trust.' },
-    vision: { overline: 'Vision', title: 'Our vision', text: 'To set a higher standard for professional cleaning across North America, combining international growth with personalized care and exceptional customer experiences.' },
-    services: {
-      overline: 'Our services',
-      title: 'What we do',
-      items: [
-        { title: 'Residential Cleaning', tagline: 'A Cleaner Home. A Better Lifestyle.', desc: 'Professional cleaning solutions designed to keep your home fresh, comfortable, and beautifully maintained. Available for one-time, weekly, biweekly, and monthly services.' },
-        { title: 'Airbnb & Short-Term Rentals', tagline: 'Seamless Turnovers. Exceptional Guest Experiences.', desc: 'Reliable cleaning and property preparation between guest stays, including linen changes, restocking, inventory checks, and customized cleaning checklists.' },
-        { title: 'Deep Cleaning', tagline: 'A Deeper Clean. A Fresh Start.', desc: 'Detailed cleaning that goes beyond everyday maintenance, focusing on areas that need extra attention and care.' },
-        { title: 'Move-In & Move-Out', tagline: 'Moving Made Easier.', desc: 'Comprehensive cleaning services to prepare properties for new residents or ensure a smooth transition after moving out.' },
-        { title: 'Commercial & Office', tagline: 'Clean Spaces. Productive Workplaces.', desc: 'Professional cleaning solutions for offices, workplaces, and commercial properties, tailored to your business needs.' },
-        { title: 'Retail Stores', tagline: 'Every Detail Reflects Your Brand.', desc: 'Specialized cleaning for retail stores, boutiques, and showrooms, ensuring welcoming and professionally maintained spaces.' },
-        { title: 'Recurring Housekeeping', tagline: 'Consistent Care for Everyday Living.', desc: 'Personalized housekeeping services designed for busy families and professionals who value comfort, organization, and reliable ongoing support.' },
-      ],
-    },
-    additional: {
-      overline: 'More services',
-      title: 'Additional property care',
-      intro: 'Beyond traditional cleaning, WhiteGlove offers additional services to support homeowners, Airbnb hosts, and property managers.',
-      items: [
-        { title: 'Inventory & Restocking', desc: 'Monitoring and replenishing essential household and guest supplies.' },
-        { title: 'Laundry & Linen Care', desc: 'Washing, replacing, and organizing towels and bed linens.' },
-        { title: 'Property Condition Reports', desc: 'Observations, photographic updates, and general property condition reporting.' },
-        { title: 'Custom Cleaning Checklists', desc: 'Property-specific cleaning procedures for consistent quality.' },
-        { title: 'Turnover Coordination', desc: 'Scheduling and preparation between guest check-outs and check-ins.' },
-        { title: 'Supply Purchasing', desc: 'Assistance with purchasing and managing essential property supplies.' },
-      ],
-      note: '*Additional services are subject to availability and individual property requirements.',
-    },
-    why: {
-      overline: 'Why choose us',
-      title: 'The WhiteGlove difference',
-      items: [
-        { title: 'Trusted & Reliable', desc: 'Professional service built on trust, responsibility, and consistency.' },
-        { title: 'Attention to Detail', desc: 'We believe the smallest details create the biggest difference.' },
-        { title: 'Personalized Service', desc: 'Every property is unique. Our solutions are designed around your needs.' },
-        { title: 'Clear Communication', desc: 'Transparent, responsive communication throughout every service.' },
-        { title: 'Professional Team', desc: 'Coordinated cleaning professionals committed to maintaining high service standards.' },
-        { title: 'Flexible Scheduling', desc: 'Convenient one-time and recurring cleaning options tailored to your routine.' },
-      ],
-    },
-    areas: {
-      overline: 'Service areas',
-      title: 'Where we operate',
-      canada: { country: 'Canada', city1: 'Toronto & GTA', regions1: 'Downtown · Yorkville · Yonge & Eglinton · St. Lawrence · Moss Park · Scarborough · Mississauga · Oakville · Burlington · Richmond Hill · Markham · surrounding communities', city2: 'Hamilton', regions2: 'Downtown Hamilton · Ancaster · surrounding communities' },
-      usa: { country: 'United States', city1: 'Seattle · Washington', regions1: 'Seattle · surrounding communities (subject to availability)' },
-      mexico: { country: 'Mexico', city1: 'Guadalajara · Jalisco', regions1: 'Guadalajara · Zapopan · selected areas within the Metropolitan Area' },
-      note: '*Service availability may vary by location.',
-    },
-    values: {
-      overline: 'Values',
-      title: 'Our values',
-      items: [
-        { title: 'Trust', desc: 'Building lasting relationships through reliability and integrity.' },
-        { title: 'Transparency', desc: 'Honest communication and clear expectations.' },
-        { title: 'Excellence', desc: 'Maintaining high-quality standards in every service.' },
-        { title: 'Commitment', desc: 'Taking responsibility for every property entrusted to our care.' },
-        { title: 'Respect', desc: 'Valuing our clients, team members, and their spaces.' },
-        { title: 'Consistency', desc: 'Delivering dependable service across every location.' },
-      ],
-    },
-    how: {
-      overline: 'How it works',
-      title: 'How it works',
-      items: [
-        { num: '1', title: 'Get in Touch', desc: 'Tell us about your property and the cleaning service you need.' },
-        { num: '2', title: 'Receive Your Quote', desc: "We'll prepare a personalized estimate based on your requirements." },
-        { num: '3', title: 'Schedule Your Service', desc: 'Choose a convenient date and time based on availability.' },
-        { num: '4', title: 'Enjoy the Experience', desc: 'Our team takes care of the details while you enjoy peace of mind.' },
-      ],
-    },
-    testimonials: {
-      overline: 'What they say about us',
-      title: 'Stories that make us proud',
-      subtitle: "Trust is built one space at a time. Here's what our clients say about WhiteGlove.",
-    },
-    contact: {
-      overline: 'Contact',
-      title: 'Your space deserves the WhiteGlove treatment.',
-      subtitle: "Whether it's your home, business, or rental property, we're here to make exceptional care feel effortless.",
-      cta: 'Request a free quote',
-      ctaWeb: 'Visit website',
-      serving: 'Serving Canada, the United States, and Mexico.',
-    },
-    footer: {
-      tag: 'Professional Cleaning. Exceptional Care.',
-      canada: 'Canada: Toronto & GTA · Hamilton',
-      usa: 'USA: Seattle, Washington',
-      mexico: 'Mexico: Guadalajara, Jalisco',
-      services: 'Residential · Airbnb · Deep Cleaning · Move-In/Out · Commercial · Retail · Housekeeping',
-      rights: '© 2026 WhiteGlove Professional Services. All Rights Reserved.',
-    },
-  },
-};
-
-// Helper para traducciones (dot notation: t('hero.title'))
-const tr = (lang, key) => {
-  const parts = key.split('.');
-  let v = TRANSLATIONS[lang];
-  for (const p of parts) v = v?.[p];
-  return v != null ? v : key;
-};
-
-function RoleSelector({ onPick, onBack }) {
-  const RoleCard = ({ id, title, description, icon: Icon }) => (
-    <button
-      onClick={() => onPick(id)}
-      className="w-full rounded-3xl p-5 mb-3 flex items-center gap-4 transition-all"
-      style={{ background: c.paper, boxShadow: '0 4px 24px rgba(11,29,74,0.06)' }}
-    >
-      <div className="w-14 h-14 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
-        <Icon size={22} style={{ color: c.apricot }} />
-      </div>
-      <div className="flex-1 text-left">
-        <div className="text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{title}</div>
-        {description && <div className="text-xs mt-0.5" style={{ color: c.graytext }}>{description}</div>}
-      </div>
-      <ChevronRight size={18} style={{ color: c.apricot }} />
-    </button>
-  );
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center px-6 py-8" style={{ background: c.cream }}>
-      <div className="w-full max-w-sm">
-        <BrandHeader />
-        <div className="text-center mb-6">
-          <h1 className="text-4xl font-serif mb-2" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>Bienvenida</h1>
-          <p className="text-sm italic" style={{ color: c.graytext }}>¿Cómo vas a ingresar hoy?</p>
-        </div>
-        <RoleCard id="admin" title="Admin" description="" icon={Shield} />
-        <RoleCard id="cleaner" title="Cleaner" description="Registrar mis servicios del día" icon={Sparkles} />
-        {onBack && (
-          <button onClick={onBack} className="w-full mt-3 py-3 rounded-2xl text-xs font-semibold tracking-wider flex items-center justify-center gap-2" style={{ background: 'transparent', color: c.graytext }}>
-            <ChevronLeft size={14} /> Regresar al sitio
-          </button>
-        )}
-        <div className="text-center mt-6 text-[10px] tracking-wider" style={{ color: c.graytext, opacity: 0.7 }}>
-          © 2026 WHITEGLOVE PROFESSIONAL SERVICES
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminLogin({ onLogin, onBack }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPwd, setShowPwd] = useState(false);
-  const [error, setError] = useState('');
-
-  function submit() {
-    const typed = username.trim().toLowerCase();
-    // Find the canonical user key by case-insensitive match
-    const matchedKey = Object.keys(USERS).find((k) => k.toLowerCase() === typed);
-    const user = matchedKey ? USERS[matchedKey] : null;
-    if (!user || user.password.toLowerCase() !== password.toLowerCase()) {
-      setError('Usuario o contraseña incorrectos');
-      return;
-    }
-    onLogin({ role: 'admin', username: matchedKey, displayName: user.displayName });
-  }
-
-  const inputStyle = { background: c.paper, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 15 };
-
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center px-6 py-8" style={{ background: c.cream }}>
-      <div className="w-full max-w-sm">
-        <button onClick={onBack} className="mb-4 flex items-center gap-2 text-xs font-semibold" style={{ color: c.graytext }}>
-          <ArrowLeft size={14} /> Volver
-        </button>
-        <BrandHeader />
-        <div className="text-center mb-6">
-          <h1 className="text-3xl font-serif mb-2" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>Acceso Admin</h1>
-          <p className="text-sm italic" style={{ color: c.graytext }}>Ingresa con tu usuario y contraseña</p>
-        </div>
-        <div className="rounded-3xl p-6" style={{ background: c.paper, boxShadow: '0 4px 24px rgba(11,29,74,0.06)' }}>
-          <div className="mb-4">
-            <label className="text-[10px] tracking-[0.2em] font-semibold uppercase block mb-2" style={{ color: c.graytext }}>Usuario</label>
-            <div className="relative">
-              <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: c.graytext }} />
-              <input type="text" value={username}
-                onChange={(e) => { setUsername(e.target.value); setError(''); }}
-                onKeyDown={(e) => e.key === 'Enter' && submit()}
-                placeholder="Tu usuario" autoCapitalize="none" autoCorrect="off"
-                className="w-full pl-11 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
-            </div>
-          </div>
-          <div className="mb-5">
-            <label className="text-[10px] tracking-[0.2em] font-semibold uppercase block mb-2" style={{ color: c.graytext }}>Contraseña</label>
-            <div className="relative">
-              <input type={showPwd ? 'text' : 'password'} value={password}
-                onChange={(e) => { setPassword(e.target.value); setError(''); }}
-                onKeyDown={(e) => e.key === 'Enter' && submit()}
-                placeholder="Tu contraseña"
-                className="w-full pl-4 pr-12 py-3 rounded-2xl outline-none" style={inputStyle} />
-              <button type="button" onClick={() => setShowPwd(!showPwd)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center">
-                {showPwd ? <EyeOff size={16} style={{ color: c.graytext }} /> : <Eye size={16} style={{ color: c.graytext }} />}
-              </button>
-            </div>
-          </div>
-          {error && (
-            <div className="rounded-2xl p-3 mb-4 text-xs text-center font-semibold" style={{ background: c.terraLight, color: c.terra }}>{error}</div>
-          )}
-          <button onClick={submit} disabled={!username || !password}
-            className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide transition-all"
-            style={{ background: (username && password) ? c.navy : c.divider, color: (username && password) ? c.paper : c.graytext, opacity: (username && password) ? 1 : 0.6 }}>
-            INICIAR SESIÓN
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CleanerLogin({ onLogin, onBack, cleanersDb = [], allCleaners: allCleanersProp }) {
-  const CLEANERS_LIST = (allCleanersProp && allCleanersProp.length) ? allCleanersProp : CLEANERS;
-  const [pendingCleaner, setPendingCleaner] = useState(null);
-  const [passInput, setPassInput] = useState('');
-  const [passError, setPassError] = useState('');
-
-  function tryLoginWithPass() {
-    const record = cleanersDb.find((cc) => cc.name === pendingCleaner);
-    if (record && (passInput || '').trim().toLowerCase() === (record.password || '').toLowerCase()) {
-      onLogin({ role: 'cleaner', cleanerName: pendingCleaner, displayName: pendingCleaner });
-    } else {
-      setPassError('Contraseña incorrecta');
-    }
-  }
-
-  function handleCleanerPick(name) {
-    const record = cleanersDb.find((cc) => cc.name === name);
-    if (record && record.password) {
-      setPendingCleaner(name);
-      setPassInput('');
-      setPassError('');
-    } else {
-      // Legacy cleaner without password → login directly
-      onLogin({ role: 'cleaner', cleanerName: name, displayName: name });
-    }
-  }
-
-  // Password entry screen
-  if (pendingCleaner) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: c.cream }}>
-        <div className="w-full max-w-sm">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: c.apricot }}>
-              <User size={28} style={{ color: c.navy }} />
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Hola, {pendingCleaner}</h2>
-            <p className="text-sm italic mt-1" style={{ color: c.graytext }}>Ingresa tu contraseña</p>
-          </div>
-          <input type="password" value={passInput} onChange={(e) => { setPassInput(e.target.value); setPassError(''); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') tryLoginWithPass(); }}
-            placeholder="Contraseña" autoFocus
-            className="w-full px-4 py-3 rounded-2xl outline-none mb-3"
-            style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 }} />
-          {passError && <div className="text-xs mb-3 text-center" style={{ color: c.terra }}>{passError}</div>}
-          <button onClick={tryLoginWithPass} className="w-full py-3 rounded-2xl font-semibold text-sm tracking-wider mb-2"
-            style={{ background: c.navy, color: c.paper }}>
-            ENTRAR
-          </button>
-          <button onClick={() => setPendingCleaner(null)} className="w-full py-3 rounded-2xl font-semibold text-xs tracking-wider"
-            style={{ background: 'transparent', color: c.graytext }}>
-            ← Cambiar cleaner
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center px-6 py-8" style={{ background: c.cream }}>
-      <div className="w-full max-w-sm">
-        <button onClick={onBack} className="mb-4 flex items-center gap-2 text-xs font-semibold" style={{ color: c.graytext }}>
-          <ArrowLeft size={14} /> Volver
-        </button>
-        <BrandHeader />
-        <div className="text-center mb-6">
-          <h1 className="text-3xl font-serif mb-2" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>¿Quién eres?</h1>
-          <p className="text-sm italic" style={{ color: c.graytext }}>Toca tu nombre para entrar</p>
-        </div>
-        {CLEANERS_LIST.map((name) => (
-          <button
-            key={name}
-            onClick={() => handleCleanerPick(name)}
-            className="w-full rounded-3xl p-4 mb-3 flex items-center gap-4 transition-all"
-            style={{ background: c.paper, boxShadow: '0 4px 24px rgba(11,29,74,0.06)' }}
-          >
-            <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricot }}>
-              <span className="text-sm font-bold" style={{ color: c.paper, fontFamily: "'Playfair Display', Georgia, serif" }}>{initialsOf(name)}</span>
-            </div>
-            <div className="flex-1 text-left">
-              <div className="text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{name}</div>
-              <div className="text-xs" style={{ color: c.graytext }}>Cleaner</div>
-            </div>
-            <ChevronRight size={18} style={{ color: c.apricot }} />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function UserMenu({ user, onLogout, onClose, onOpenSettings, onOpenHistorial, onOpenAddClient, onOpenAddCleaner }) {
-  const isAdmin = user.role === 'admin';
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-        <div className="flex items-center gap-4 mb-6 px-2">
-          <div className="w-14 h-14 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
-            <span className="text-sm font-bold" style={{ color: c.apricot, fontFamily: "'Playfair Display', Georgia, serif" }}>
-              {initialsOf(user.displayName)}
-            </span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.graytext }}>Sesión activa</span>
-              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ background: isAdmin ? c.navy : c.apricot, color: c.paper }}>
-                {isAdmin ? 'ADMIN' : 'CLEANER'}
-              </span>
-            </div>
-            <div className="text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>
-              {user.displayName}
-            </div>
-            <div className="text-xs" style={{ color: c.graytext }}>{isAdmin ? `@${user.username}` : 'Cleaner'}</div>
-          </div>
-        </div>
-        {hasFullAccess(user) && onOpenAddClient && (
-          <button onClick={onOpenAddClient} className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
-            style={{ background: c.cream, color: c.navy, border: `1px solid ${c.divider}` }}>
-            <Building2 size={15} /> AGREGAR CLIENTE
-          </button>
-        )}
-        {hasFullAccess(user) && onOpenAddCleaner && (
-          <button onClick={onOpenAddCleaner} className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
-            style={{ background: c.cream, color: c.navy, border: `1px solid ${c.divider}` }}>
-            <User size={15} /> AGREGAR CLEANER
-          </button>
-        )}
-        {hasFullAccess(user) && onOpenHistorial && (
-          <button
-            onClick={onOpenHistorial}
-            className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
-            style={{ background: c.cream, color: c.navy, border: `1px solid ${c.divider}` }}
-          >
-            <ClipboardList size={15} /> HISTORIAL DE CAMBIOS
-          </button>
-        )}
-        {hasFullAccess(user) && onOpenSettings && (
-          <button
-            onClick={onOpenSettings}
-            className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 mb-2"
-            style={{ background: c.apricotPale, color: c.apricot }}
-          >
-            <Sparkles size={15} /> AJUSTES DE TARIFAS
-          </button>
-        )}
-        <button
-          onClick={onLogout}
-          className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2"
-          style={{ background: c.terraLight, color: c.terra }}
-        >
-          <LogOut size={15} /> CERRAR SESIÓN
-        </button>
-        <button
-          onClick={onClose}
-          className="w-full py-3 rounded-2xl font-semibold text-sm mt-2"
-          style={{ background: c.cream, color: c.graytext }}
-        >
-          Cancelar
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Header({ subtitle, showLogo, currentUser, onOpenMenu }) {
-  return (
-    <div className="px-6 pt-8 pb-5" style={{ background: c.cream }}>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <div className="h-px w-6" style={{ background: c.apricot }} />
-          <span className="text-xs tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>WHITEGLOVE</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {showLogo && (
-            <img src={LOGO_URI} alt="WhiteGlove" className="w-9 h-9 rounded-full object-cover" style={{ boxShadow: '0 2px 8px rgba(11,29,74,0.15)' }} />
-          )}
-          {currentUser && (
-            <button onClick={onOpenMenu} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.apricotPale, border: `1px solid ${c.apricotSoft}` }}>
-              <span className="text-[11px] font-bold" style={{ color: c.apricot }}>{initialsOf(currentUser.displayName)}</span>
-            </button>
-          )}
-        </div>
-      </div>
-      <h1 className="text-3xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>
-        {subtitle}
-      </h1>
-    </div>
-  );
-}
-
-function KPI({ label, value, sub, accent, icon: Icon }) {
-  return (
-    <div className="rounded-3xl p-5 flex flex-col justify-between" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)', minHeight: 130 }}>
-      <div className="flex items-start justify-between">
-        <span className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.graytext }}>{label}</span>
-        <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: accent + '25' }}>
-          <Icon size={14} style={{ color: accent }} />
-        </div>
-      </div>
-      <div>
-        <div className="text-3xl font-serif" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{value}</div>
-        {sub && <div className="text-xs mt-1" style={{ color: c.graytext }}>{sub}</div>}
-      </div>
-    </div>
-  );
-}
-
-function ServiceCard({ svc, onDelete, onEdit, isAdmin, canSeeCobro, canSeePagos }) {
-  const isExtra = svc.tipo === 'Extra Task';
-  const cleanersList = cleanersOf(svc);
-  const cleanersDisplay = cleanersList.length > 1
-    ? `${cleanersList.slice(0, 2).join(' + ')}${cleanersList.length > 2 ? ` +${cleanersList.length - 2}` : ''}`
-    : (cleanersList[0] || '—');
-  const totalPagoSvc = getTotalPago(svc);
-  const costoReal = calcCostoServicio(svc);
-  const utilidad = svc.cobro != null ? svc.cobro - costoReal : null;
-
-  return (
-    <div className="rounded-2xl p-4 mb-3 flex items-center gap-3" style={{ background: c.paper, boxShadow: '0 1px 6px rgba(43,41,38,0.04)' }}>
-      <button
-        onClick={isAdmin && onEdit ? () => onEdit(svc) : undefined}
-        className="flex items-center gap-3 flex-1 min-w-0 text-left"
-        style={{ cursor: isAdmin && onEdit ? 'pointer' : 'default' }}
-      >
-        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: isExtra ? c.blushSoft : c.apricotPale }}>
-          <div className="text-xs font-bold tracking-tight" style={{ color: isExtra ? c.blushDeep : c.navy }}>
-            {(() => {
-              if (!svc.fecha) return '';
-              const [, m, d] = svc.fecha.split('-');
-              return `${d}/${m}`;
-            })()}
-          </div>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm truncate" style={{ color: c.charcoal }}>{svc.unidad}</span>
-            {isExtra && <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ background: c.blushSoft, color: c.blushDeep }}>EXTRA</span>}
-            {cleanersList.length > 1 && <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ background: c.apricotPale, color: c.apricot }}>{cleanersList.length}×</span>}
-          </div>
-          <div className="text-xs mt-0.5" style={{ color: c.graytext }}>
-            {cleanersDisplay} · {svc.horas}h{svc.cobro != null && svc.cobro !== '' && canSeeCobro ? ` · ${fmtMoney(svc.cobro)}` : ''}
-          </div>
-          {isAdmin && (canSeePagos || canSeeCobro) && (totalPagoSvc > 0 || svc.pagoCleaningTeam > 0 || svc.tip != null || (canSeeCobro && utilidad != null)) && (
-            <div className="text-[10px] mt-1 flex items-center gap-2 flex-wrap">
-              {canSeePagos && totalPagoSvc > 0 && <span style={{ color: c.graytext }}>Cleaner: <b style={{ color: c.charcoal }}>{fmtMoney(totalPagoSvc)}</b></span>}
-              {canSeePagos && svc.pagoCleaningTeam > 0 && <span style={{ color: c.graytext }}>Team: <b style={{ color: c.charcoal }}>{fmtMoney(svc.pagoCleaningTeam)}</b></span>}
-              {canSeePagos && svc.tip != null && svc.tip > 0 && <span style={{ color: c.blushDeep }}>Tip: <b>{fmtMoney(svc.tip)}</b></span>}
-              {canSeeCobro && utilidad != null && (
-                <span style={{ color: utilidad >= 0 ? c.sage : c.terra }}>
-                  Utilidad: <b>{fmtMoney(utilidad)}</b>
-                </span>
-              )}
-            </div>
-          )}
-          {svc.capturista && (
-            <div className="text-[10px] mt-1 italic" style={{ color: c.graytext, opacity: 0.7 }}>
-              capturado por {svc.capturista}
-            </div>
-          )}
-        </div>
-      </button>
-      {isAdmin && onDelete && (
-        <button onClick={() => onDelete(svc.id)} className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-          <Trash2 size={13} style={{ color: c.graytext }} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function AddServiceModal({ onClose, onSave, onUpdate, currentUser, existingService, rates, unitsList, cleanersList }) {
-  const UNITS_TO_USE = unitsList && unitsList.length ? unitsList : UNITS;
-  const CLEANERS_TO_USE = cleanersList && cleanersList.length ? cleanersList : CLEANERS;
-  const isCleaner = currentUser?.role === 'cleaner';
-  const isEditing = !!existingService;
-  const canSeeCobro = hasFullAccess(currentUser);     // Solo Fernandouribe + Michelle
-  const canSeePagos = canManagePagos(currentUser);    // Todos los admins (incl. FerCastil)
-  const initialCleaners = existingService
-    ? (Array.isArray(existingService.cleaners) ? existingService.cleaners : (existingService.cleaner ? [existingService.cleaner] : []))
-    : (isCleaner ? [currentUser.cleanerName] : []);
-
-  const [fecha, setFecha] = useState(existingService?.fecha || todayISO());
-  const [unidad, setUnidad] = useState(existingService?.unidad || '');
-  const [cleaners, setCleaners] = useState(initialCleaners);
-  const [horas, setHoras] = useState(existingService?.horas != null ? Number(existingService.horas) : 0);
-  const [tipo, setTipo] = useState(existingService?.tipo || 'Limpieza');
-  const [cobro, setCobro] = useState(existingService?.cobro != null ? String(existingService.cobro) : '');
-  const initialPagos = () => {
-    if (existingService?.pagosPorCleaner) {
-      const out = {};
-      Object.entries(existingService.pagosPorCleaner).forEach(([k, v]) => { out[k] = String(v); });
-      return out;
-    }
-    if (existingService?.pagoCleaner != null && initialCleaners.length > 0) {
-      const share = Number(existingService.pagoCleaner) / initialCleaners.length;
-      const out = {};
-      initialCleaners.forEach((cl) => { out[cl] = String(share); });
-      return out;
-    }
-    return {};
-  };
-  const initialRates = () => {
-    if (existingService?.ratesPorCleaner) {
-      const out = {};
-      Object.entries(existingService.ratesPorCleaner).forEach(([k, v]) => { out[k] = String(v); });
-      return out;
-    }
-    // Backward compat: derivar rate de pago/horas si existe
-    if (existingService?.pagosPorCleaner && existingService?.horas) {
-      const out = {};
-      Object.entries(existingService.pagosPorCleaner).forEach(([k, v]) => {
-        out[k] = String((Number(v) / Number(existingService.horas)).toFixed(2));
-      });
-      return out;
-    }
-    return {};
-  };
-  const [pagosPorCleaner, setPagosPorCleaner] = useState(initialPagos());
-  const [ratesPorCleaner, setRatesPorCleaner] = useState(initialRates());
-  const [pagosEditedManually, setPagosEditedManually] = useState({});
-  const [tip, setTip] = useState(existingService?.tip != null ? String(existingService.tip) : '');
-  const [pagoCleaningTeam, setPagoCleaningTeam] = useState(existingService?.pagoCleaningTeam != null ? String(existingService.pagoCleaningTeam) : '');
-  const [capturista, setCapturista] = useState(existingService?.capturista || (isCleaner ? currentUser.cleanerName : (!canSeeCobro ? (currentUser?.displayName || '') : '')));
-
-  // Cobro y pago al cleaner son opcionales para todos (admin y cleaner).
-  const canSave = isCleaner
-    ? (fecha && unidad && cleaners.length > 0 && horas > 0 && tipo)
-    : (fecha && unidad && cleaners.length > 0 && horas > 0 && tipo && capturista);
-
-  // Time picker helpers (1-24 hours, minutes en incrementos de 15)
-  const totalMinutes = Math.round((horas || 0) * 60);
-  const displayH = Math.floor(totalMinutes / 60);
-  const displayM = totalMinutes % 60;
-  function setTimeMinutes(mins) {
-    const clamped = Math.max(0, Math.min(24 * 60, mins));
-    setHoras(clamped / 60);
-  }
-  function bumpHours(delta) { setTimeMinutes(totalMinutes + delta * 60); }
-  function bumpMinutes(delta) { setTimeMinutes(totalMinutes + delta * 15); }
-
-  // Al cambiar la lista de cleaners: inicializa rates y pagos para los nuevos según tarifa global.
-  useEffect(() => {
-    if (isCleaner || !canSeePagos) return;
-    const globalRate = rates?.[tipo];
-    const defaultHourlyRate = globalRate?.mode === 'hourly' ? String(globalRate.amount) : '';
-    const defaultFlatPago = globalRate?.mode === 'flat' ? String(globalRate.amount) : '';
-
-    const nextRates = { ...ratesPorCleaner };
-    const nextPagos = { ...pagosPorCleaner };
-
-    cleaners.forEach((cl) => {
-      // Solo inicializar si aún no tiene rate NI pago (cleaner nuevo)
-      if (nextRates[cl] == null && nextPagos[cl] == null) {
-        if (defaultHourlyRate) {
-          nextRates[cl] = defaultHourlyRate;
-          nextPagos[cl] = String(Number(defaultHourlyRate) * (Number(horas) || 0));
-        } else if (defaultFlatPago) {
-          nextPagos[cl] = defaultFlatPago;
-          nextRates[cl] = horas > 0 ? String((Number(defaultFlatPago) / Number(horas)).toFixed(2)) : '';
-        }
-      }
-    });
-
-    // Quitar rates/pagos de cleaners que ya no están seleccionadas
-    Object.keys(nextRates).forEach((cl) => { if (!cleaners.includes(cl)) delete nextRates[cl]; });
-    Object.keys(nextPagos).forEach((cl) => { if (!cleaners.includes(cl)) delete nextPagos[cl]; });
-
-    setRatesPorCleaner(nextRates);
-    setPagosPorCleaner(nextPagos);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cleaners.join('|'), tipo]);
-
-  // Al cambiar las horas: recalcular pagos según rates individuales (rates se mantienen).
-  useEffect(() => {
-    if (isCleaner || !canSeePagos) return;
-    const nextPagos = { ...pagosPorCleaner };
-    cleaners.forEach((cl) => {
-      const rate = parseFloat(ratesPorCleaner[cl]);
-      if (!isNaN(rate)) {
-        nextPagos[cl] = String(rate * (Number(horas) || 0));
-      }
-    });
-    setPagosPorCleaner(nextPagos);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [horas]);
-
-  // Cambiar rate de un cleaner → recalcula su pago = rate × horas
-  function updateRateDe(cleaner, value) {
-    setRatesPorCleaner({ ...ratesPorCleaner, [cleaner]: value });
-    const rate = parseFloat(value);
-    if (!isNaN(rate)) {
-      setPagosPorCleaner({ ...pagosPorCleaner, [cleaner]: String(rate * (Number(horas) || 0)) });
-    } else {
-      setPagosPorCleaner({ ...pagosPorCleaner, [cleaner]: '' });
-    }
-    setPagosEditedManually({ ...pagosEditedManually, [cleaner]: true });
-  }
-
-  // Cambiar pago total de un cleaner → recalcula su rate = pago / horas
-  function updatePagoDe(cleaner, value) {
-    setPagosPorCleaner({ ...pagosPorCleaner, [cleaner]: value });
-    const pago = parseFloat(value);
-    if (!isNaN(pago) && horas > 0) {
-      setRatesPorCleaner({ ...ratesPorCleaner, [cleaner]: String((pago / Number(horas)).toFixed(2)) });
-    }
-    setPagosEditedManually({ ...pagosEditedManually, [cleaner]: true });
-  }
-
-  const totalPago = cleaners.reduce((sum, cl) => sum + (parseFloat(pagosPorCleaner[cl]) || 0), 0);
-
-  function toggleCleaner(name) {
-    // Cleaner logueada: su nombre queda fijo (no puede quitarse a sí misma)
-    if (isCleaner && name === currentUser.cleanerName && cleaners.includes(name)) return;
-    setCleaners(cleaners.includes(name) ? cleaners.filter((n) => n !== name) : [...cleaners, name]);
-  }
-
-  function handleSave() {
-    if (!canSave) return;
-    // Construir pagosPorCleaner limpio (solo cleaners actuales, valores numéricos)
-    const pagosClean = {};
-    const ratesClean = {};
-    cleaners.forEach((cl) => {
-      const v = pagosPorCleaner[cl];
-      if (v !== undefined && v !== '' && v !== null) {
-        const num = parseFloat(v);
-        if (!isNaN(num)) pagosClean[cl] = num;
-      }
-      const rv = ratesPorCleaner[cl];
-      if (rv !== undefined && rv !== '' && rv !== null) {
-        const rnum = parseFloat(rv);
-        if (!isNaN(rnum)) ratesClean[cl] = rnum;
-      }
-    });
-    const totalPagoNum = Object.values(pagosClean).reduce((s, v) => s + v, 0);
-    const payload = {
-      id: existingService?.id || Date.now(),
-      fecha, unidad,
-      cleaners,
-      cleaner: cleaners[0] || '',
-      horas: Number(horas), tipo,
-      // Cobro al cliente: solo full admin edita; FerCastil preserva lo existente.
-      cobro: canSeeCobro ? (cobro === '' ? null : parseFloat(cobro) || 0) : (existingService?.cobro ?? null),
-      // Pagos (cleaning team, per cleaner, rates, tip): FerCastil también edita.
-      pagoCleaner: canSeePagos ? (totalPagoNum || null) : (existingService?.pagoCleaner ?? null),
-      pagosPorCleaner: canSeePagos ? (Object.keys(pagosClean).length ? pagosClean : null) : (existingService?.pagosPorCleaner ?? null),
-      ratesPorCleaner: canSeePagos ? (Object.keys(ratesClean).length ? ratesClean : null) : (existingService?.ratesPorCleaner ?? null),
-      pagoCleaningTeam: canSeePagos ? (pagoCleaningTeam === '' ? null : parseFloat(pagoCleaningTeam) || 0) : (existingService?.pagoCleaningTeam ?? null),
-      tip: canSeePagos ? (tip === '' ? null : parseFloat(tip) || 0) : (existingService?.tip ?? null),
-      capturista,
-    };
-    if (isEditing) onUpdate(payload);
-    else onSave(payload);
-  }
-
-  const field = (label, children) => (
-    <div className="mb-4">
-      <label className="text-[10px] tracking-[0.2em] font-semibold uppercase block mb-2" style={{ color: c.graytext }}>{label}</label>
-      {children}
-    </div>
-  );
-  const inputStyle = { background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 };
-  const pillButton = (val, current, setter) => (
-    <button key={val} onClick={() => setter(val)} className="px-4 py-2 rounded-full text-sm font-medium transition-all"
-      style={{ background: current === val ? c.gold : c.cream, color: current === val ? c.paper : c.graytext, border: `1px solid ${current === val ? c.gold : c.divider}` }}>
-      {val}
-    </button>
-  );
-  const multiPill = (val) => {
-    const active = cleaners.includes(val);
-    const locked = isCleaner && val === currentUser.cleanerName;
-    return (
-      <button key={val} onClick={() => toggleCleaner(val)}
-        className="px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-1.5"
-        style={{ background: active ? c.gold : c.cream, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.gold : c.divider}`, opacity: locked ? 0.9 : 1 }}>
-        {active && <span style={{ fontSize: 10 }}>✓</span>}
-        {val}
-      </button>
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(43,41,38,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles size={12} style={{ color: c.gold }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.gold }}>{isEditing ? 'EDITAR' : 'NUEVO'}</span>
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>{isEditing ? 'Editar servicio' : 'Registrar servicio'}</h2>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.cream }}>
-            <X size={16} style={{ color: c.charcoal }} />
-          </button>
-        </div>
-        {field('Fecha', <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full px-4 py-3 rounded-2xl outline-none" style={inputStyle} />)}
-        {field('Unidad / Cliente',
-          <select value={unidad} onChange={(e) => setUnidad(e.target.value)} className="w-full px-4 py-3 rounded-2xl outline-none appearance-none" style={inputStyle}>
-            <option value="">Selecciona una unidad</option>
-            {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-        )}
-        {field(cleaners.length > 1 ? `Cleaners (${cleaners.length})` : 'Cleaners',
-          <div className="flex gap-2 flex-wrap">{CLEANERS.map((cl) => multiPill(cl))}</div>
-        )}
-        {field('Duración',
-          <div className="rounded-2xl p-4" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
-            <div className="text-center mb-3">
-              <span className="text-4xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{displayH}</span>
-              <span className="text-lg" style={{ color: c.graytext, marginLeft: 2, marginRight: 8 }}>h</span>
-              <span className="text-4xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{String(displayM).padStart(2, '0')}</span>
-              <span className="text-lg" style={{ color: c.graytext, marginLeft: 2 }}>m</span>
-            </div>
-            <div className="flex items-center justify-center gap-6">
-              <div>
-                <div className="text-[9px] tracking-[0.2em] font-semibold uppercase text-center mb-1.5" style={{ color: c.graytext }}>Horas</div>
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => bumpHours(-1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
-                    <Minus size={14} style={{ color: c.navy }} />
-                  </button>
-                  <div className="w-8 text-center font-bold" style={{ color: c.navy }}>{displayH}</div>
-                  <button type="button" onClick={() => bumpHours(1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
-                    <Plus size={14} style={{ color: c.navy }} />
-                  </button>
-                </div>
-              </div>
-              <div>
-                <div className="text-[9px] tracking-[0.2em] font-semibold uppercase text-center mb-1.5" style={{ color: c.graytext }}>Minutos</div>
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => bumpMinutes(-1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
-                    <Minus size={14} style={{ color: c.navy }} />
-                  </button>
-                  <div className="w-8 text-center font-bold" style={{ color: c.navy }}>{String(displayM).padStart(2, '0')}</div>
-                  <button type="button" onClick={() => bumpMinutes(1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.paper, border: `1px solid ${c.divider}` }}>
-                    <Plus size={14} style={{ color: c.navy }} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        {field('Tipo de servicio', <div className="flex gap-2">{TYPES.map((t) => pillButton(t, tipo, setTipo))}</div>)}
-        {canSeeCobro && field('Cobro al cliente (opcional)',
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
-            <input type="number" inputMode="decimal" value={cobro} onChange={(e) => setCobro(e.target.value)} placeholder="Puedes dejarlo en blanco" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
-          </div>
-        )}
-        {canSeePagos && field(
-          <span className="flex items-center gap-1.5">Pago a cleaning team (opcional) <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
-            <input type="number" inputMode="decimal" value={pagoCleaningTeam} onChange={(e) => setPagoCleaningTeam(e.target.value)} placeholder="Pago grupal / de equipo" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
-          </div>
-        )}
-        {canSeePagos && cleaners.length > 0 && field(
-          <span className="flex items-center gap-1.5">Pago a cleaner <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
-          <div className="rounded-2xl p-3" style={{ background: c.cream, border: `1px solid ${c.divider}` }}>
-            {cleaners.map((cl, idx) => (
-              <div key={cl} className={idx > 0 ? 'mt-3 pt-3' : ''} style={idx > 0 ? { borderTop: `1px solid ${c.divider}` } : {}}>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
-                    <span className="text-[10px] font-bold" style={{ color: c.apricot }}>{initialsOf(cl)}</span>
-                  </div>
-                  <div className="text-sm font-semibold flex-1" style={{ color: c.navy }}>{cl}</div>
-                </div>
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <div className="text-[9px] tracking-wider font-semibold uppercase mb-1" style={{ color: c.graytext }}>Por hora</div>
-                    <div className="relative">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: c.graytext }}>$</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        value={ratesPorCleaner[cl] || ''}
-                        onChange={(e) => updateRateDe(cl, e.target.value)}
-                        placeholder="0"
-                        className="w-full pl-6 pr-2 py-2 rounded-xl outline-none text-right"
-                        style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 13 }}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[9px] tracking-wider font-semibold uppercase mb-1" style={{ color: c.graytext }}>Total</div>
-                    <div className="relative">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: c.graytext }}>$</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        value={pagosPorCleaner[cl] || ''}
-                        onChange={(e) => updatePagoDe(cl, e.target.value)}
-                        placeholder="0"
-                        className="w-full pl-6 pr-2 py-2 rounded-xl outline-none text-right"
-                        style={{ background: c.paper, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 13, fontWeight: 600 }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {cleaners.length > 1 && (
-              <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: `1px solid ${c.divider}` }}>
-                <span className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.graytext }}>Total pago</span>
-                <span className="text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>{fmtMoney(totalPago)}</span>
-              </div>
-            )}
-          </div>
-        )}
-        {canSeePagos && field(
-          <span className="flex items-center gap-1.5">Tip a la cleaner (opcional) <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.navy, color: c.apricot }}>ADMIN</span></span>,
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg" style={{ color: c.graytext }}>$</span>
-            <input type="number" inputMode="decimal" value={tip} onChange={(e) => setTip(e.target.value)} placeholder="Si el cliente le dio propina" className="w-full pl-9 pr-4 py-3 rounded-2xl outline-none" style={inputStyle} />
-          </div>
-        )}
-        {canSeeCobro && field('Capturado por', <div className="flex gap-2 flex-wrap">{CAPTURISTAS.map((p) => pillButton(p, capturista, setCapturista))}</div>)}
-        <button onClick={handleSave} disabled={!canSave} className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide mt-2 transition-all"
-          style={{ background: canSave ? c.charcoal : c.divider, color: canSave ? c.paper : c.graytext, opacity: canSave ? 1 : 0.6 }}>
-          {isEditing ? 'GUARDAR CAMBIOS' : 'GUARDAR SERVICIO'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function HomeTab({ services, setTab, currentUser, onOpenMenu }) {
-  const monthKey = currentMonthKey();
-  const monthSvcs = services.filter((s) => inMonth(s.fecha, monthKey));
-  const totalSvcs = monthSvcs.length;
-  const totalHrs = monthSvcs.reduce((sum, s) => sum + (s.horas || 0), 0);
-  const totalRev = monthSvcs.reduce((sum, s) => sum + (s.cobro || 0), 0);
-  const totalPaid = monthSvcs.reduce((sum, s) => sum + calcCostoServicio(s), 0);
-  const ticket = totalSvcs ? totalRev / totalSvcs : 0;
-  const uniqueCleaners = new Set();
-  monthSvcs.forEach((s) => cleanersOf(s).forEach((cl) => uniqueCleaners.add(cl)));
-  const uniqueUnits = new Set(monthSvcs.map((s) => s.unidad)).size;
-  const recent = [...services].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).slice(0, 4);
-
-  return (
-    <div>
-      <Header subtitle={`Buen día ${currentUser ? currentUser.displayName.split(' ')[0] : ''} ✨`} showLogo currentUser={currentUser} onOpenMenu={onOpenMenu} />
-      <div className="px-6 -mt-2">
-        <div className="text-sm mb-4 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>{monthLabel(monthKey)}</div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <KPI label="Servicios" value={totalSvcs} sub="este mes" accent={c.gold} icon={Sparkles} />
-          <KPI label="Horas" value={totalHrs.toFixed(2).replace(/\.?0+$/, '')} sub="trabajadas" accent={c.sage} icon={Clock} />
-          {hasFullAccess(currentUser) ? (
-            <>
-              <KPI label="Ingresos" value={fmtMoney(totalRev)} sub="cobro clientes" accent={c.blushDeep} icon={DollarSign} />
-              <KPI label="Utilidad" value={fmtMoney(totalRev - totalPaid)} sub={`pagos: ${fmtMoney(totalPaid)}`} accent={c.terra} icon={TrendingUp} />
-            </>
-          ) : canManagePagos(currentUser) ? (
-            <>
-              <KPI label="Pagos" value={fmtMoney(totalPaid)} sub="a cleaners / team" accent={c.blushDeep} icon={DollarSign} />
-              <KPI label="Cleaners" value={uniqueCleaners.size} sub="activas este mes" accent={c.terra} icon={User} />
-            </>
-          ) : (
-            <>
-              <KPI label="Cleaners" value={uniqueCleaners.size} sub="activas este mes" accent={c.blushDeep} icon={User} />
-              <KPI label="Unidades" value={uniqueUnits} sub="atendidas" accent={c.terra} icon={Building2} />
-            </>
-          )}
-        </div>
-        <div className="flex items-center justify-between mb-3 mt-2">
-          <h2 className="text-lg font-serif" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>Últimos servicios</h2>
-          <button onClick={() => setTab('registro')} className="text-xs font-semibold flex items-center gap-1" style={{ color: c.gold }}>
-            Ver todo <ChevronRight size={12} />
-          </button>
-        </div>
-        {recent.length === 0 ? (
-          <div className="rounded-2xl p-8 text-center" style={{ background: c.paper }}>
-            <div className="w-14 h-14 rounded-full mx-auto mb-3 flex items-center justify-center" style={{ background: c.blushSoft }}>
-              <Sparkles size={20} style={{ color: c.blushDeep }} />
-            </div>
-            <div className="text-sm font-semibold mb-1" style={{ color: c.charcoal }}>Aún no hay servicios</div>
-            <div className="text-xs" style={{ color: c.graytext }}>Toca el botón + para registrar el primero</div>
-          </div>
-        ) : (
-          recent.map((s) => <ServiceCard key={s.id} svc={s} isAdmin={currentUser?.role === 'admin'} canSeeCobro={hasFullAccess(currentUser)} canSeePagos={canManagePagos(currentUser)} />)
-        )}
-      </div>
-    </div>
-  );
-}
-
-function RegistroTab({ services, onDelete, onEdit, currentUser, onOpenMenu, allCleaners: allCleanersProp }) {
-  const allCleaners = allCleanersProp || CLEANERS;
-  const isCleaner = currentUser?.role === 'cleaner';
-  const canSeeCobro = hasFullAccess(currentUser);
-  const canSeePagos = canManagePagos(currentUser);
-  const [filter, setFilter] = useState([]); // tipos
-  const [filterCleaner, setFilterCleaner] = useState([]);
-  const [filterCap, setFilterCap] = useState([]);
-  const [filterMes, setFilterMes] = useState([]);
-  const [filterUnidad, setFilterUnidad] = useState([]);
-
-  // Base: servicios visibles a este usuario
-  const baseList = isCleaner
-    ? services.filter((s) => cleanersOf(s).includes(currentUser.cleanerName))
-    : services;
-
-  const availableMonths = [...new Set(baseList.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
-  const availableUnits = [...new Set(baseList.map((s) => s.unidad).filter(Boolean))].sort();
-
-  let list = [...baseList].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
-  if (filterMes.length > 0) list = list.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m)));
-  if (filterUnidad.length > 0) list = list.filter((s) => filterUnidad.includes(s.unidad));
-  if (filter.length > 0) list = list.filter((s) => filter.includes(s.tipo));
-  if (!isCleaner && filterCleaner.length > 0) list = list.filter((s) => cleanersOf(s).some((cl) => filterCleaner.includes(cl)));
-  if (!isCleaner && filterCap.length > 0) list = list.filter((s) => filterCap.includes(s.capturista));
-
-  // Multi-select chip: 'todos' limpia la selección; otros valores toggle
-  const chipMulti = (label, val, arr, setter) => {
-    const isAll = val === '__all__';
-    const active = isAll ? arr.length === 0 : arr.includes(val);
-    const onClick = () => {
-      if (isAll) setter([]);
-      else setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
-    };
-    return (
-      <button onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-        style={{ background: active ? c.charcoal : c.paper, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.charcoal : c.divider}` }}>
-        {label}
-      </button>
-    );
-  };
-
-  return (
-    <div>
-      <Header subtitle="Registro" currentUser={currentUser} onOpenMenu={onOpenMenu} />
-      <div className="px-6 -mt-2 pb-4">
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes <span className="text-[9px] font-normal italic normal-case" style={{ color: c.graytext }}>(toca varios para combinar)</span></div>
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chipMulti('Todos', '__all__', filterMes, setFilterMes)}
-          {availableMonths.map((m) => chipMulti(fmtMonthKey(m), m, filterMes, setFilterMes))}
-        </div>
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cliente</div>
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chipMulti('Todos', '__all__', filterUnidad, setFilterUnidad)}
-          {availableUnits.map((u) => chipMulti(u, u, filterUnidad, setFilterUnidad))}
-        </div>
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Tipo</div>
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chipMulti('Todos', '__all__', filter, setFilter)}
-          {chipMulti('Limpieza', 'Limpieza', filter, setFilter)}
-          {chipMulti('Extra Task', 'Extra Task', filter, setFilter)}
-        </div>
-        {!isCleaner && (
-          <>
-            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
-            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chipMulti('Todas', '__all__', filterCleaner, setFilterCleaner)}
-              {allCleaners.map((cl) => chipMulti(cl, cl, filterCleaner, setFilterCleaner))}
-            </div>
-            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Capturado por</div>
-            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-              {chipMulti('Todos', '__all__', filterCap, setFilterCap)}
-              {CAPTURISTAS.map((p) => chipMulti(p, p, filterCap, setFilterCap))}
-            </div>
-          </>
-        )}
-      </div>
-      <div className="px-6">
-        <div className="text-xs mb-3" style={{ color: c.graytext }}>{list.length} {list.length === 1 ? 'servicio' : 'servicios'}</div>
-        {list.length === 0 ? (
-          <div className="rounded-2xl p-8 text-center" style={{ background: c.paper }}><div className="text-sm" style={{ color: c.graytext }}>Nada aquí todavía</div></div>
-        ) : (
-          list.map((s) => <ServiceCard key={s.id} svc={s} onDelete={!isCleaner ? onDelete : null} onEdit={onEdit} isAdmin={!isCleaner} canSeeCobro={canSeeCobro} canSeePagos={canSeePagos} />)
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GraficasTab({ services, currentUser, onOpenMenu, allCleaners: allCleanersProp }) {
-  const allCleanersG = allCleanersProp || CLEANERS;
-  const isAdmin = currentUser?.role === 'admin';
-  const isCleaner = currentUser?.role === 'cleaner';
-  const canSeeCobro = hasFullAccess(currentUser);
-  const canSeePagos = canManagePagos(currentUser);
-  // En Gráficas default es el mes actual. Vacío = Año completo. 'anio' chip toggle lo mismo.
-  const [filterMes, setFilterMes] = useState([currentMonthKey()]);
-  const [filterSemanaG, setFilterSemanaG] = useState([]);
-  const [filterCleanerG, setFilterCleanerG] = useState([]);
-  const [showServiceList, setShowServiceList] = useState(false);
-  const [yearMode, setYearMode] = useState(false);
-
-  function getWeekOfMonth(iso) {
-    try {
-      const d = parseInt((iso || '').split('-')[2], 10);
-      return Math.ceil(d / 7);
-    } catch (e) { return 0; }
-  }
-
-  useEffect(() => {
-    if (yearMode && filterSemanaG.length > 0) setFilterSemanaG([]);
-  }, [yearMode, filterSemanaG]);
-
-  const baseList = isCleaner
-    ? services.filter((s) => cleanersOf(s).includes(currentUser.cleanerName))
-    : services;
-
-  const availableMonths = [...new Set(baseList.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort().reverse();
-  const curM = currentMonthKey();
-  if (!availableMonths.includes(curM)) availableMonths.unshift(curM);
-
-  const currentYear = new Date().getFullYear().toString();
-  let monthSvcs;
-  if (yearMode) {
-    monthSvcs = baseList.filter((s) => (s.fecha || '').startsWith(currentYear));
-  } else if (filterMes.length === 0) {
-    monthSvcs = baseList; // vacío = todo lo histórico
-  } else {
-    monthSvcs = baseList.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m)));
-  }
-
-  const availableWeeks = (yearMode || filterMes.length === 0) ? [] :
-    [...new Set(monthSvcs.map((s) => getWeekOfMonth(s.fecha)).filter(Boolean))].sort();
-
-  if (filterSemanaG.length > 0 && !yearMode && filterMes.length > 0) {
-    monthSvcs = monthSvcs.filter((s) => filterSemanaG.includes(getWeekOfMonth(s.fecha)));
-  }
-
-  if (!isCleaner && filterCleanerG.length > 0) {
-    monthSvcs = monthSvcs.filter((s) => cleanersOf(s).some((cl) => filterCleanerG.includes(cl)));
-  }
-
-  // Lista de servicios ordenada (más reciente primero)
-  const periodServices = [...monthSvcs].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
-
-  // Si el admin filtra por 1 cleaner, mostramos solo ese; si no, todos
-  const cleanersToShow = (!isCleaner && filterCleanerG.length > 0) ? filterCleanerG : allCleanersG;
-
-  const nomina = cleanersToShow.map((cl) => {
-    const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
-    const horas = svcs.reduce((sum, s) => sum + (s.horas || 0), 0);
-    const ganancias = svcs.reduce((sum, s) => sum + getGananciaDeCleaner(s, cl), 0);
-    return { name: cl, servicios: svcs.length, horas, ganancias };
-  }).filter((r) => r.servicios > 0 || r.ganancias > 0);
-
-  const byCleaner = cleanersToShow.map((cl) => {
-    const svcs = monthSvcs.filter((s) => cleanersOf(s).includes(cl));
-    return {
-      name: cl,
-      ingresos: svcs.reduce((sum, s) => sum + ((s.cobro || 0) / Math.max(1, cleanersOf(s).length)), 0),
-      horas: svcs.reduce((sum, s) => sum + (s.horas || 0), 0),
-    };
-  });
-  const byUnit = UNITS.map((u) => ({ name: u, servicios: monthSvcs.filter((s) => s.unidad === u).length })).filter((r) => r.servicios > 0);
-  const byType = TYPES.map((t) => ({ name: t, value: monthSvcs.filter((s) => s.tipo === t).reduce((sum, s) => sum + (s.cobro || 0), 0) })).filter((r) => r.value > 0);
-
-  // Multi-select chip: 'todos' limpia la selección; otros valores toggle
-  const chipMulti = (label, val, arr, setter) => {
-    const isAll = val === '__all__';
-    const active = isAll ? arr.length === 0 : arr.includes(val);
-    const onClick = () => {
-      if (isAll) setter([]);
-      else setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
-    };
-    return (
-      <button onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-        style={{ background: active ? c.charcoal : c.paper, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.charcoal : c.divider}` }}>
-        {label}
-      </button>
-    );
-  };
-  const PIE_COLORS = [c.gold, c.blushDeep];
-
-  const ChartCard = ({ title, subtitle, children, empty }) => (
-    <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
-      <div className="mb-3">
-        <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.gold }}>{subtitle}</div>
-        <h3 className="text-lg font-serif mt-0.5" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>{title}</h3>
-      </div>
-      {empty ? <div className="py-8 text-center text-sm" style={{ color: c.graytext }}>Sin datos en este período</div> : children}
-    </div>
-  );
-
-  return (
-    <div>
-      <Header subtitle="Gráficas" currentUser={currentUser} onOpenMenu={onOpenMenu} />
-      <div className="px-6 -mt-2 pb-4">
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Período <span className="text-[9px] font-normal italic normal-case" style={{ color: c.graytext }}>(toca varios para combinar)</span></div>
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          <button onClick={() => { setYearMode(!yearMode); if (!yearMode) setFilterMes([]); }}
-            className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-            style={{ background: yearMode ? c.charcoal : c.paper, color: yearMode ? c.paper : c.graytext, border: `1px solid ${yearMode ? c.charcoal : c.divider}` }}>
-            Año {currentYear}
-          </button>
-          {!yearMode && availableMonths.map((m) => chipMultiG(fmtMonthKey(m), m, filterMes, setFilterMes))}
-        </div>
-        {!yearMode && filterMes.length > 0 && availableWeeks.length > 0 && (
-          <>
-            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Semana del mes</div>
-            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chipMultiG('Todas', '__all__', filterSemanaG, setFilterSemanaG)}
-              {availableWeeks.map((w) => chipMultiG(`Semana ${w}`, w, filterSemanaG, setFilterSemanaG))}
-            </div>
-          </>
-        )}
-        {!isCleaner && (
-          <>
-            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
-            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-              {chipMultiG('Todas', '__all__', filterCleanerG, setFilterCleanerG)}
-              {allCleanersG.map((cl) => chipMultiG(cl, cl, filterCleanerG, setFilterCleanerG))}
-            </div>
-          </>
-        )}
-      </div>
-      <div className="px-6">
-        <div className="text-sm mb-4 capitalize" style={{ color: c.graytext, fontStyle: 'italic' }}>
-          {yearMode ? `Año ${currentYear}` : (filterMes.length === 0 ? 'Todo el historial' : (filterMes.length === 1 ? monthLabel(filterMes[0]) : `${filterMes.length} meses`))}
-          {filterSemanaG.length > 0 && !yearMode ? ` · ${filterSemanaG.length === 1 ? `Semana ${filterSemanaG[0]}` : `${filterSemanaG.length} semanas`}` : ''}
-          {filterCleanerG.length > 0 ? ` · ${filterCleanerG.length === 1 ? filterCleanerG[0] : `${filterCleanerG.length} cleaners`}` : ''}
-        </div>
-
-        {canSeePagos && (
-          <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
-            <div className="mb-3">
-              <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.apricot }}>NÓMINA</div>
-              <h3 className="text-lg font-serif mt-0.5" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Ganancias por cleaner</h3>
-            </div>
-
-            {nomina.length === 0 ? (
-              <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este período</div>
-            ) : (
-              <>
-                <div className="flex items-center px-2 pb-2" style={{ borderBottom: `1px solid ${c.divider}` }}>
-                  <div className="flex-1 text-[9px] tracking-wider uppercase font-semibold" style={{ color: c.graytext }}>Cleaner</div>
-                  <div className="w-16 text-[9px] tracking-wider uppercase font-semibold text-center" style={{ color: c.graytext }}>Horas</div>
-                  <div className="w-24 text-[9px] tracking-wider uppercase font-semibold text-right" style={{ color: c.graytext }}>Ganancias</div>
-                </div>
-                {nomina.map((row) => (
-                  <div key={row.name} className="flex items-center px-2 py-2.5" style={{ borderBottom: `1px solid ${c.divider}` }}>
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.apricotPale }}>
-                        <span className="text-[10px] font-bold" style={{ color: c.apricot }}>{initialsOf(row.name)}</span>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold truncate" style={{ color: c.navy }}>{row.name}</div>
-                        <div className="text-[10px]" style={{ color: c.graytext }}>{row.servicios} {row.servicios === 1 ? 'servicio' : 'servicios'}</div>
-                      </div>
-                    </div>
-                    <div className="w-16 text-center text-sm font-medium" style={{ color: c.charcoal }}>
-                      {row.horas.toFixed(2).replace(/\.?0+$/, '')}h
-                    </div>
-                    <div className="w-24 text-right text-sm font-bold font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>
-                      {fmtMoney(row.ganancias)}
-                    </div>
-                  </div>
-                ))}
-                <div className="flex items-center px-2 pt-3 mt-1">
-                  <div className="flex-1 text-[10px] tracking-[0.2em] uppercase font-semibold" style={{ color: c.graytext }}>Total</div>
-                  <div className="w-16 text-center text-sm font-bold" style={{ color: c.navy }}>
-                    {nomina.reduce((s, r) => s + r.horas, 0).toFixed(2).replace(/\.?0+$/, '')}h
-                  </div>
-                  <div className="w-24 text-right text-lg font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>
-                    {fmtMoney(nomina.reduce((s, r) => s + r.ganancias, 0))}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        <div className="rounded-3xl p-5 mb-4" style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.gold }}>SERVICIOS DEL PERÍODO</div>
-              <h3 className="text-lg font-serif mt-0.5" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>
-                {periodServices.length} {periodServices.length === 1 ? 'servicio' : 'servicios'}
-              </h3>
-            </div>
-            {periodServices.length > 0 && (
-              <button onClick={() => setShowServiceList(!showServiceList)}
-                className="px-3 py-1.5 rounded-full text-xs font-semibold"
-                style={{ background: showServiceList ? c.navy : c.cream, color: showServiceList ? c.paper : c.graytext, border: `1px solid ${showServiceList ? c.navy : c.divider}` }}>
-                {showServiceList ? 'Ocultar' : 'Ver lista'}
-              </button>
-            )}
-          </div>
-          {periodServices.length === 0 ? (
-            <div className="py-6 text-center text-sm" style={{ color: c.graytext }}>Sin servicios en este período</div>
-          ) : showServiceList && (
-            <div>
-              {periodServices.map((s) => {
-                const cls = cleanersOf(s).join(', ');
-                const totalPago = getTotalPago(s);
-                return (
-                  <div key={s.id} className="flex items-center py-2.5" style={{ borderTop: `1px solid ${c.divider}` }}>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-xs font-bold" style={{ color: c.navy }}>{s.fecha}</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: c.cream, color: c.graytext }}>{s.tipo}</span>
-                        <span className="text-xs" style={{ color: c.graytext }}>· {s.horas}h</span>
-                      </div>
-                      <div className="text-sm font-semibold truncate" style={{ color: c.navy }}>{s.unidad}</div>
-                      <div className="text-[11px]" style={{ color: c.graytext }}>{cls}</div>
-                    </div>
-                    {canSeePagos && totalPago > 0 && (
-                      <div className="text-right flex-shrink-0 ml-2">
-                        <div className="text-sm font-bold font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>{fmtMoney(totalPago)}</div>
-                        {canSeeCobro && s.cobro != null && <div className="text-[10px]" style={{ color: c.graytext }}>cobro: {fmtMoney(s.cobro)}</div>}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {canSeeCobro && <ChartCard title="Ingresos por cleaner" subtitle="ESTE MES" empty={byCleaner.every((r) => r.ingresos === 0)}>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={byCleaner} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: c.charcoal, fontSize: 12, fontWeight: 500 }} width={60} />
-              <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
-              <Bar dataKey="ingresos" fill={c.gold} radius={[0, 12, 12, 0]}>
-                <LabelList dataKey="ingresos" position="right" formatter={(v) => fmtMoney(v)} style={{ fill: c.charcoal, fontSize: 11, fontWeight: 600 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>}
-        <ChartCard title="Horas trabajadas" subtitle="POR CLEANER" empty={byCleaner.every((r) => r.horas === 0)}>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={byCleaner} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: c.charcoal, fontSize: 12, fontWeight: 500 }} width={60} />
-              <Tooltip formatter={(v) => `${v} h`} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
-              <Bar dataKey="horas" fill={c.blushDeep} radius={[0, 12, 12, 0]}>
-                <LabelList dataKey="horas" position="right" formatter={(v) => `${v}h`} style={{ fill: c.charcoal, fontSize: 11, fontWeight: 600 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-        {canSeeCobro && <ChartCard title="Ingresos por tipo" subtitle="DISTRIBUCIÓN" empty={byType.length === 0}>
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie data={byType} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} style={{ fontSize: 11, fill: c.charcoal, fontWeight: 600 }}>
-                {byType.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} stroke={c.paper} strokeWidth={3} />)}
-              </Pie>
-              <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartCard>}
-        <ChartCard title="Servicios por unidad" subtitle="ACTIVIDAD" empty={byUnit.length === 0}>
-          <ResponsiveContainer width="100%" height={Math.max(180, byUnit.length * 32)}>
-            <BarChart data={byUnit} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: c.charcoal, fontSize: 11, fontWeight: 500 }} width={100} />
-              <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
-              <Bar dataKey="servicios" fill={c.sage} radius={[0, 12, 12, 0]}>
-                <LabelList dataKey="servicios" position="right" style={{ fill: c.charcoal, fontSize: 11, fontWeight: 600 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-    </div>
-  );
-}
-
-function StockRow({ item, onUpdate }) {
-  const low = item.qty < item.min;
-  return (
-    <div className="rounded-2xl p-4 mb-3 flex items-center gap-3" style={{ background: c.paper, boxShadow: '0 1px 6px rgba(43,41,38,0.04)' }}>
-      <div className="flex-1 min-w-0">
-        <div className="text-[9px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.graytext }}>{item.cat}</div>
-        <div className="font-semibold text-sm truncate" style={{ color: c.charcoal }}>{item.prod}</div>
-        <div className="text-xs mt-0.5" style={{ color: c.graytext }}>Mínimo: {item.min} {item.unit}</div>
-      </div>
-      <div className="flex items-center gap-1 mr-1">
-        <button onClick={() => onUpdate(item.id, Math.max(0, item.qty - 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.cream }}>
-          <Minus size={13} style={{ color: c.charcoal }} />
-        </button>
-        <div className="w-10 text-center font-bold text-lg" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>{item.qty}</div>
-        <button onClick={() => onUpdate(item.id, item.qty + 1)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.cream }}>
-          <Plus size={13} style={{ color: c.charcoal }} />
-        </button>
-      </div>
-      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: low ? c.terraLight : c.sageLight }}>
-        {low ? <AlertCircle size={14} style={{ color: c.terra }} /> : <CheckCircle2 size={14} style={{ color: c.sage }} />}
-      </div>
-    </div>
-  );
-}
-
-function StockTab({ stockByUnit, stockStorage, updateUnitStock, updateStorage, currentUser, onOpenMenu }) {
-  const [section, setSection] = useState('unidades');
-  const [selectedUnit, setSelectedUnit] = useState(UNITS[0]);
-  const [showUnitPicker, setShowUnitPicker] = useState(false);
-  const currentItems = section === 'unidades' ? (stockByUnit[selectedUnit] || []) : stockStorage;
-  const updater = section === 'unidades' ? (id, qty) => updateUnitStock(selectedUnit, id, qty) : updateStorage;
-  const totalLow = section === 'unidades'
-    ? Object.values(stockByUnit).reduce((sum, arr) => sum + countLow(arr), 0)
-    : countLow(stockStorage);
-
-  return (
-    <div>
-      <Header subtitle="Stock" currentUser={currentUser} onOpenMenu={onOpenMenu} />
-      <div className="px-6 -mt-2">
-        <div className="flex gap-2 mb-5 p-1 rounded-2xl" style={{ background: c.paper }}>
-          <button onClick={() => setSection('unidades')} className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
-            style={{ background: section === 'unidades' ? c.charcoal : 'transparent', color: section === 'unidades' ? c.paper : c.graytext }}>
-            <Building2 size={13} /> POR UNIDAD
-          </button>
-          <button onClick={() => setSection('storage')} className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
-            style={{ background: section === 'storage' ? c.charcoal : 'transparent', color: section === 'storage' ? c.paper : c.graytext }}>
-            <Warehouse size={13} /> STORAGE
-          </button>
-        </div>
-
-        {section === 'unidades' && (
-          <div className="mb-4">
-            <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Unidad seleccionada</div>
-            <button
-              onClick={() => setShowUnitPicker(true)}
-              className="w-full px-4 py-3 rounded-2xl flex items-center justify-between"
-              style={{ background: c.paper, border: `1px solid ${c.divider}` }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.apricotPale }}>
-                  <Building2 size={15} style={{ color: c.apricot }} />
-                </div>
-                <div className="text-left">
-                  <div className="text-sm font-semibold" style={{ color: c.navy }}>{selectedUnit}</div>
-                  <div className="text-[10px]" style={{ color: c.graytext }}>Toca para cambiar</div>
-                </div>
-              </div>
-              {countLow(stockByUnit[selectedUnit] || []) > 0 && (
-                <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: c.terraLight, color: c.terra }}>
-                  {countLow(stockByUnit[selectedUnit] || [])} bajo
-                </span>
-              )}
-            </button>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="text-[10px] tracking-[0.2em] font-semibold uppercase" style={{ color: c.gold }}>
-              {section === 'unidades' ? 'INVENTARIO EN UNIDAD' : 'STORAGE CENTRAL'}
-            </div>
-            <h2 className="text-xl font-serif" style={{ color: c.charcoal, fontFamily: "'Playfair Display', Georgia, serif" }}>
-              {section === 'unidades' ? selectedUnit : 'Bodega'}
-            </h2>
-          </div>
-          <div className="text-right">
-            <div className="text-xs" style={{ color: c.graytext }}>{currentItems.length} productos</div>
-          </div>
-        </div>
-
-        {countLow(currentItems) > 0 && (
-          <div className="rounded-2xl p-3 mb-4 flex items-center gap-3" style={{ background: c.terraLight }}>
-            <AlertCircle size={16} style={{ color: c.terra }} />
-            <div className="text-xs font-semibold" style={{ color: c.terra }}>
-              {countLow(currentItems)} {countLow(currentItems) === 1 ? 'producto' : 'productos'} por reordenar aquí
-            </div>
-          </div>
-        )}
-
-        {section === 'unidades' && totalLow > 0 && (
-          <div className="text-[11px] mb-3 text-center" style={{ color: c.graytext }}>
-            En total, {totalLow} {totalLow === 1 ? 'producto está' : 'productos están'} bajo mínimo en todas las unidades
-          </div>
-        )}
-
-        {currentItems.map((item) => (<StockRow key={item.id} item={item} onUpdate={updater} />))}
-      </div>
-      {showUnitPicker && (
-        <UnitPickerModal
-          units={UNITS}
-          stockByUnit={stockByUnit}
-          selected={selectedUnit}
-          onSelect={(u) => { setSelectedUnit(u); setShowUnitPicker(false); }}
-          onClose={() => setShowUnitPicker(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-function UnitPickerModal({ units, stockByUnit, selected, onSelect, onClose }) {
-  const [query, setQuery] = useState('');
-  const filtered = units.filter((u) => u.toLowerCase().includes(query.toLowerCase()));
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.5)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[85vh] overflow-hidden flex flex-col" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Building2 size={12} style={{ color: c.apricot }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>UNIDADES</span>
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>Selecciona una</h2>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.cream }}>
-            <X size={16} style={{ color: c.navy }} />
-          </button>
-        </div>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar unidad..."
-          className="w-full px-4 py-3 rounded-2xl outline-none mb-3"
-          style={{ background: c.cream, border: `1px solid ${c.divider}`, color: c.navy, fontSize: 14 }}
-          autoFocus
-        />
-        <div className="overflow-y-auto flex-1 -mx-1 px-1">
-          {filtered.length === 0 && (
-            <div className="py-8 text-center text-sm" style={{ color: c.graytext }}>Sin coincidencias</div>
-          )}
-          {filtered.map((u) => {
-            const low = countLow(stockByUnit[u] || []);
-            const isSelected = u === selected;
-            return (
-              <button
-                key={u}
-                onClick={() => onSelect(u)}
-                className="w-full rounded-2xl p-3 mb-2 flex items-center gap-3 transition-all"
-                style={{
-                  background: isSelected ? c.apricotPale : c.cream,
-                  border: `1px solid ${isSelected ? c.apricot : 'transparent'}`,
-                }}
-              >
-                <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ background: isSelected ? c.apricot : c.paper }}>
-                  <Building2 size={14} style={{ color: isSelected ? c.paper : c.apricot }} />
-                </div>
-                <div className="flex-1 text-left">
-                  <div className="text-sm font-semibold" style={{ color: c.navy }}>{u}</div>
-                  <div className="text-[10px]" style={{ color: c.graytext }}>
-                    {(stockByUnit[u] || []).length} productos
-                  </div>
-                </div>
-                {low > 0 && (
-                  <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: c.terraLight, color: c.terra }}>
-                    {low} bajo
-                  </span>
-                )}
-                {isSelected && (
-                  <CheckCircle2 size={16} style={{ color: c.apricot }} />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ScheduleModal({ onClose, onSave, existing, unitsList, cleanersList }) {
-  const [fecha, setFecha] = useState(existing?.fecha || todayISO());
-  const [hora, setHora] = useState(existing?.hora || '');
-  const [unidad, setUnidad] = useState(existing?.unidad || '');
-  const [cleaners, setCleaners] = useState(existing?.cleaners || []);
-  const [tipo, setTipo] = useState(existing?.tipo || 'Limpieza');
-  const [notas, setNotas] = useState(existing?.notas || '');
-  const canSave = fecha && unidad && cleaners.length > 0;
-
-  const inputStyle = { background: c.cream, border: `1px solid ${c.divider}`, color: c.charcoal, fontSize: 15 };
-
-  function toggleCleaner(name) {
-    setCleaners(cleaners.includes(name) ? cleaners.filter((n) => n !== name) : [...cleaners, name]);
-  }
-
-  function handleSave() {
-    if (!canSave) return;
-    const payload = {
-      fecha, hora: hora || null, unidad, cleaners, tipo, notas: notas || null, estado: existing?.estado || 'programado',
-    };
-    if (existing?.id) payload.id = existing.id;
-    onSave(payload);
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 overflow-y-auto" style={{ background: 'rgba(11,29,74,0.4)' }} onClick={onClose}>
-      <div className="w-full max-w-md md:max-w-2xl rounded-t-[32px] md:rounded-3xl md:my-8 p-6 pt-4 max-h-[90vh] overflow-y-auto" style={{ background: c.paper }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full mx-auto mb-5" style={{ background: c.divider }} />
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Calendar size={12} style={{ color: c.apricot }} />
-              <span className="text-[10px] tracking-[0.3em] font-semibold" style={{ color: c.apricot }}>AGENDA</span>
-            </div>
-            <h2 className="text-2xl font-serif" style={{ color: c.navy, fontFamily: "'Playfair Display', Georgia, serif" }}>{existing?.id ? 'Editar servicio programado' : 'Programar servicio'}</h2>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-            <X size={16} style={{ color: c.navy }} />
-          </button>
-        </div>
-
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Fecha</div>
-          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)}
-            className="w-full px-4 py-3 rounded-2xl outline-none" style={inputStyle} />
-        </div>
-
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Hora (opcional)</div>
-          <input type="time" value={hora} onChange={(e) => setHora(e.target.value)}
-            className="w-full px-4 py-3 rounded-2xl outline-none" style={inputStyle} />
-        </div>
-
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Cliente / Unidad</div>
-          <select value={unidad} onChange={(e) => setUnidad(e.target.value)}
-            className="w-full px-4 py-3 rounded-2xl outline-none appearance-none" style={inputStyle}>
-            <option value="">Selecciona unidad</option>
-            {unitsList.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-        </div>
-
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Tipo</div>
-          <div className="flex gap-2">
-            {['Limpieza', 'Extra Task'].map((t) => (
-              <button key={t} onClick={() => setTipo(t)}
-                className="flex-1 py-2 rounded-full text-xs font-semibold"
-                style={{
-                  background: tipo === t ? c.navy : c.cream, color: tipo === t ? c.paper : c.graytext,
-                  border: `1px solid ${tipo === t ? c.navy : c.divider}`
-                }}>{t}</button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Cleaners asignadas</div>
-          <div className="flex gap-2 flex-wrap">
-            {cleanersList.map((cl) => (
-              <button key={cl} onClick={() => toggleCleaner(cl)}
-                className="px-3 py-1.5 rounded-full text-xs font-semibold"
-                style={{
-                  background: cleaners.includes(cl) ? c.gold : c.cream,
-                  color: cleaners.includes(cl) ? c.paper : c.graytext,
-                  border: `1px solid ${cleaners.includes(cl) ? c.gold : c.divider}`
-                }}>{cl}</button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <div className="text-[10px] tracking-[0.2em] font-semibold uppercase mb-2" style={{ color: c.graytext }}>Notas (opcional)</div>
-          <textarea value={notas} onChange={(e) => setNotas(e.target.value)} rows={2} placeholder="Instrucciones, horario de check-in/out, llaves…"
-            className="w-full px-4 py-3 rounded-2xl outline-none resize-none" style={inputStyle} />
-        </div>
-
-        <button onClick={handleSave} disabled={!canSave}
-          className="w-full py-4 rounded-2xl font-semibold text-sm tracking-wide"
-          style={{ background: canSave ? c.navy : c.divider, color: canSave ? c.paper : c.graytext }}>
-          {existing?.id ? 'GUARDAR CAMBIOS' : 'PROGRAMAR SERVICIO'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CalendarioTab({ schedule, currentUser, onOpenMenu, onOpenNew, onEdit, onDelete, allClients: allClientsProp, allCleaners: allCleanersProp }) {
-  const allClientsCal = allClientsProp || UNITS;
-  const allCleanersCal = allCleanersProp || CLEANERS;
-  const [filterMes, setFilterMes] = useState([]);
-  const [filterSemana, setFilterSemana] = useState([]);
-  const [filterCleanerCal, setFilterCleanerCal] = useState([]);
-  const [filterCliente, setFilterCliente] = useState([]);
-
-  useEffect(() => {
-    if (filterMes.length === 0 && filterSemana.length > 0) setFilterSemana([]);
-  }, [filterMes, filterSemana]);
-
-  function getWeekOfMonth(iso) {
-    try {
-      const d = parseInt((iso || '').split('-')[2], 10);
-      return Math.ceil(d / 7);
-    } catch (e) { return 0; }
-  }
-
-  const sorted = [...schedule].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
-  const availableMonths = [...new Set(sorted.map((s) => (s.fecha || '').substring(0, 7)).filter(Boolean))].sort();
-
-  const availableWeeks = filterMes.length === 0 ? [] :
-    [...new Set(sorted.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m))).map((s) => getWeekOfMonth(s.fecha)).filter(Boolean))].sort();
-
-  let list = sorted;
-  if (filterMes.length > 0) list = list.filter((s) => filterMes.some((m) => (s.fecha || '').startsWith(m)));
-  if (filterSemana.length > 0 && filterMes.length > 0) list = list.filter((s) => filterSemana.includes(getWeekOfMonth(s.fecha)));
-  if (filterCleanerCal.length > 0) list = list.filter((s) => (s.cleaners || []).some((cl) => filterCleanerCal.includes(cl)));
-  if (filterCliente.length > 0) list = list.filter((s) => filterCliente.includes(s.unidad));
-
-  // Agrupa por fecha
-  const grouped = {};
-  list.forEach((s) => {
-    if (!grouped[s.fecha]) grouped[s.fecha] = [];
-    grouped[s.fecha].push(s);
-  });
-
-  const todayStr = todayISO();
-  // Multi-select chip: 'todos' limpia la selección; otros valores toggle
-  const chipMulti = (label, val, arr, setter) => {
-    const isAll = val === '__all__';
-    const active = isAll ? arr.length === 0 : arr.includes(val);
-    const onClick = () => {
-      if (isAll) setter([]);
-      else setter(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
-    };
-    return (
-      <button onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap"
-        style={{ background: active ? c.charcoal : c.paper, color: active ? c.paper : c.graytext, border: `1px solid ${active ? c.charcoal : c.divider}` }}>
-        {label}
-      </button>
-    );
-  };
-
-  const fmtDate = (iso) => {
-    try {
-      const [y, m, d] = iso.split('-');
-      const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-      const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-      const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-      return `${days[date.getDay()]}, ${parseInt(d)} de ${months[parseInt(m) - 1]}`;
-    } catch (e) { return iso; }
-  };
-
-  return (
-    <div>
-      <Header subtitle="Agenda" currentUser={currentUser} onOpenMenu={onOpenMenu} />
-      <div className="px-6 -mt-2 pb-4">
-        <div className="flex gap-2 mb-3">
-          <button onClick={onOpenNew} className="flex-1 py-3 rounded-2xl font-semibold text-sm tracking-wider flex items-center justify-center gap-2"
-            style={{ background: c.apricot, color: c.navy }}>
-            <Plus size={16} /> PROGRAMAR SERVICIO
-          </button>
-        </div>
-        {availableMonths.length > 0 && (
-          <>
-            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Mes <span className="text-[9px] font-normal italic normal-case" style={{ color: c.graytext }}>(toca varios para combinar)</span></div>
-            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chipMulti('Todos', '__all__', filterMes, setFilterMes)}
-              {availableMonths.map((m) => chipMulti(fmtMonthKey(m), m, filterMes, setFilterMes))}
-            </div>
-          </>
-        )}
-        {filterMes.length > 0 && availableWeeks.length > 0 && (
-          <>
-            <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Semana del mes</div>
-            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-              {chipMulti('Todas', '__all__', filterSemana, setFilterSemana)}
-              {availableWeeks.map((w) => chipMulti(`Semana ${w}`, w, filterSemana, setFilterSemana))}
-            </div>
-          </>
-        )}
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cliente</div>
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-1 px-1">
-          {chipMulti('Todos', '__all__', filterCliente, setFilterCliente)}
-          {allClientsCal.map((u) => chipMulti(u, u, filterCliente, setFilterCliente))}
-        </div>
-        <div className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ color: c.graytext }}>Cleaner</div>
-        <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-          {chipMulti('Todas', '__all__', filterCleanerCal, setFilterCleanerCal)}
-          {allCleanersCal.map((cl) => chipMulti(cl, cl, filterCleanerCal, setFilterCleanerCal))}
-        </div>
-      </div>
-      <div className="px-6">
-        {list.length === 0 ? (
-          <div className="rounded-2xl p-8 text-center" style={{ background: c.paper }}>
-            <Calendar size={28} style={{ color: c.divider, margin: '0 auto 8px' }} />
-            <div className="text-sm" style={{ color: c.graytext }}>No hay servicios programados</div>
-          </div>
-        ) : (
-          Object.keys(grouped).sort().map((date) => {
-            const isPast = date < todayStr;
-            const isToday = date === todayStr;
-            return (
-              <div key={date} className="mb-5">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="text-xs font-semibold capitalize" style={{ color: isToday ? c.apricot : (isPast ? c.graytext : c.navy) }}>
-                    {fmtDate(date)}
-                  </div>
-                  {isToday && <span className="text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ background: c.apricot, color: c.navy }}>HOY</span>}
-                </div>
-                {grouped[date].map((item) => (
-                  <div key={item.id} onClick={() => onEdit(item)}
-                    className="rounded-2xl p-4 mb-2 cursor-pointer"
-                    style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)', opacity: isPast ? 0.6 : 1 }}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          {item.hora && <span className="text-sm font-bold" style={{ color: c.navy }}>{item.hora}</span>}
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: c.cream, color: c.graytext }}>{item.tipo}</span>
-                        </div>
-                        <div className="text-sm font-semibold" style={{ color: c.navy }}>{item.unidad}</div>
-                        <div className="text-xs mt-1" style={{ color: c.graytext }}>{(item.cleaners || []).join(' · ')}</div>
-                        {item.notas && <div className="text-xs mt-2 italic" style={{ color: c.charcoal }}>{item.notas}</div>}
-                      </div>
-                      <button onClick={(e) => { e.stopPropagation(); if (confirm('¿Eliminar este servicio programado?')) onDelete(item.id); }}
-                        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: c.cream }}>
-                        <Trash2 size={13} style={{ color: c.terra }} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MenuTab({ currentUser, onOpenMenu, setTab, onOpenHistorial, onOpenSettings, onOpenAddClient, onOpenAddCleaner, onLogout }) {
-  const canSeeMoney = hasFullAccess(currentUser);
-
-  const MenuItem = ({ icon: Icon, label, desc, onClick, accent }) => (
-    <button onClick={onClick} className="w-full flex items-center gap-4 p-4 rounded-2xl mb-2 text-left"
-      style={{ background: c.paper, boxShadow: '0 2px 12px rgba(43,41,38,0.04)' }}>
-      <div className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: accent || c.cream }}>
-        <Icon size={18} style={{ color: accent ? c.paper : c.navy }} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold" style={{ color: c.navy }}>{label}</div>
-        {desc && <div className="text-xs mt-0.5" style={{ color: c.graytext }}>{desc}</div>}
-      </div>
-      <ChevronRight size={16} style={{ color: c.graytext }} />
-    </button>
-  );
-
-  return (
-    <div>
-      <Header subtitle="Menú" currentUser={currentUser} onOpenMenu={onOpenMenu} />
-      <div className="px-6 -mt-2 pb-6">
-        <div className="text-[10px] tracking-[0.3em] font-semibold uppercase mb-3 mt-3" style={{ color: c.apricot }}>HERRAMIENTAS</div>
-        <MenuItem icon={BarChart3} label="Gráficas y Nómina" desc="KPIs, ganancias por cleaner, reportes" onClick={() => setTab('graficas')} />
-        <MenuItem icon={Package} label="Stock" desc="Inventario por unidad y storage central" onClick={() => setTab('stock')} />
-
-        {canSeeMoney && (
-          <>
-            <div className="text-[10px] tracking-[0.3em] font-semibold uppercase mb-3 mt-6" style={{ color: c.apricot }}>ADMINISTRACIÓN</div>
-            {onOpenAddClient && <MenuItem icon={Building2} label="Agregar cliente" desc="Nuevos clientes o unidades" onClick={onOpenAddClient} />}
-            {onOpenAddCleaner && <MenuItem icon={User} label="Agregar cleaner" desc="Dar de alta nuevo equipo" onClick={onOpenAddCleaner} />}
-            {onOpenSettings && <MenuItem icon={Settings} label="Ajustes de tarifas" desc="Precios por tipo de servicio" onClick={onOpenSettings} accent={c.apricot} />}
-            {onOpenHistorial && <MenuItem icon={ClipboardList} label="Historial de cambios" desc="Auditoría de todas las ediciones" onClick={onOpenHistorial} />}
-          </>
-        )}
-
-        <div className="text-[10px] tracking-[0.3em] font-semibold uppercase mb-3 mt-6" style={{ color: c.apricot }}>SESIÓN</div>
-        <MenuItem icon={LogOut} label="Cerrar sesión" desc={`Conectada como ${currentUser?.displayName || ''}`} onClick={onLogout} accent={c.terra} />
-      </div>
-    </div>
-  );
-}
-
-function BottomNav({ tab, setTab, onAdd, isCleaner }) {
-  if (isCleaner) {
-    return (
-      <div className="fixed bottom-0 left-0 right-0 z-40 max-w-md md:max-w-xl lg:max-w-2xl mx-auto">
-        <div className="mx-4 mb-4 rounded-full px-2 py-2 flex items-center justify-center gap-4" style={{ background: c.navy, boxShadow: '0 8px 32px rgba(11,29,74,0.25)' }}>
-          <button onClick={() => setTab('registro')} className="px-5 py-3 flex items-center gap-2">
-            <ClipboardList size={18} style={{ color: c.apricot }} />
-            <span className="text-xs font-semibold tracking-wide" style={{ color: c.paper }}>MIS SERVICIOS</span>
-          </button>
-          <button onClick={onAdd} className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: c.apricot, boxShadow: '0 4px 16px rgba(255,181,102,0.4)' }}>
-            <Plus size={22} style={{ color: c.paper }} strokeWidth={2.5} />
-          </button>
-        </div>
-      </div>
-    );
-  }
-  const items = [
-    { id: 'home', icon: Home, label: 'Inicio' },
-    { id: 'registro', icon: ClipboardList, label: 'Registro' },
-    { id: 'calendario', icon: Calendar, label: 'Agenda' },
-    { id: 'menu', icon: Menu, label: 'Menú' },
-  ];
-  return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 max-w-md md:max-w-xl lg:max-w-2xl mx-auto">
-      <div className="mx-4 mb-4 rounded-full px-2 py-2 flex items-center justify-between" style={{ background: c.navy, boxShadow: '0 8px 32px rgba(11,29,74,0.25)' }}>
-        {items.slice(0, 2).map((it) => (
-          <button key={it.id} onClick={() => setTab(it.id)} className="flex-1 py-2 flex flex-col items-center gap-0.5" style={{ opacity: tab === it.id ? 1 : 0.5 }}>
-            <it.icon size={18} style={{ color: tab === it.id ? c.apricot : c.paper }} />
-            <span className="text-[9px] font-semibold tracking-wide" style={{ color: c.paper }}>{it.label}</span>
-          </button>
-        ))}
-        <button onClick={onAdd} className="w-14 h-14 rounded-full flex items-center justify-center mx-2" style={{ background: c.apricot, boxShadow: '0 4px 16px rgba(255,181,102,0.4)' }}>
-          <Plus size={22} style={{ color: c.paper }} strokeWidth={2.5} />
-        </button>
-        {items.slice(2).map((it) => (
-          <button key={it.id} onClick={() => setTab(it.id)} className="flex-1 py-2 flex flex-col items-center gap-0.5" style={{ opacity: tab === it.id ? 1 : 0.5 }}>
-            <it.icon size={18} style={{ color: tab === it.id ? c.apricot : c.paper }} />
-            <span className="text-[9px] font-semibold tracking-wide" style={{ color: c.paper }}>{it.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Landing({ lang, setLang, onLogin }) {
-  const t = (key) => tr(lang, key);
-  const T = TRANSLATIONS[lang];
-  const navy = c.navy;
-  const apricot = c.apricot;
-  const cream = c.cream;
-  const paper = c.paper;
-  const divider = c.divider;
-  const graytext = c.graytext;
-  const charcoal = c.charcoal;
-
-  const Section = ({ children, bg, className = '' }) => (
-    <section className={`py-16 md:py-24 ${className}`} style={{ background: bg || paper }}>
-      <div className="max-w-6xl mx-auto px-5 md:px-8">{children}</div>
-    </section>
-  );
-
-  const Overline = ({ children }) => (
-    <div className="text-[10px] md:text-xs tracking-[0.3em] font-semibold uppercase mb-3" style={{ color: apricot }}>{children}</div>
-  );
-
-  const Title = ({ children, light }) => (
-    <h2 className="text-3xl md:text-5xl font-serif mb-6" style={{ color: light ? paper : navy, fontFamily: "'Playfair Display', Georgia, serif", lineHeight: 1.15, fontWeight: 500 }}>{children}</h2>
-  );
-
-  return (
-    <div className="min-h-screen" style={{ background: cream, fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif', color: charcoal }}>
-      {/* HEADER */}
-      <header className="sticky top-0 z-30" style={{ background: 'rgba(249,245,235,0.95)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderBottom: `1px solid ${divider}` }}>
-        <div className="max-w-6xl mx-auto px-5 md:px-8 py-3 md:py-4 flex items-center justify-between">
-          <img src={LOGO_URI} alt="WhiteGlove" style={{ height: 36 }} />
-          <div className="flex items-center gap-2 md:gap-3">
-            <button onClick={() => setLang(lang === 'es' ? 'en' : 'es')}
-              className="px-3 py-1.5 rounded-full text-[11px] font-bold tracking-[0.15em]"
-              style={{ background: paper, color: graytext, border: `1px solid ${divider}` }}>
-              {t('nav.langToggle')}
-            </button>
-            <button onClick={onLogin}
-              className="px-4 py-2 rounded-full text-[11px] md:text-xs font-bold tracking-wider"
-              style={{ background: navy, color: apricot }}>
-              {t('nav.login')}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* HERO */}
-      <section className="relative overflow-hidden" style={{ minHeight: 'calc(90vh - 68px)' }}>
-        <div className="absolute inset-0" style={{ backgroundImage: `url(${LANDING_IMAGES.hero})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(11,29,74,0.75) 0%, rgba(43,41,38,0.55) 100%)' }} />
-        <div className="relative max-w-5xl mx-auto px-5 md:px-8 py-24 md:py-32 text-center">
-          <div className="inline-block px-4 py-1.5 rounded-full text-[10px] md:text-xs tracking-[0.3em] font-bold mb-6" style={{ background: 'rgba(255,181,102,0.18)', color: apricot, border: `1px solid ${apricot}` }}>
-            {t('hero.tag')}
-          </div>
-          <h1 className="text-4xl md:text-7xl font-serif text-white mb-6" style={{ fontFamily: "'Playfair Display', Georgia, serif", lineHeight: 1.1, fontWeight: 500 }}>
-            {t('hero.headline')}
-          </h1>
-          <p className="text-base md:text-xl text-white/90 max-w-2xl mx-auto mb-6" style={{ lineHeight: 1.6 }}>
-            {t('hero.subhead')}
-          </p>
-          <div className="text-xs md:text-sm text-white/70 italic mb-10">{t('hero.regions')}</div>
-          <a href={whatsappLink(t('whatsapp.msg'))} target="_blank" rel="noopener noreferrer"
-            className="inline-block px-8 py-4 rounded-full text-xs md:text-sm font-bold tracking-wider"
-            style={{ background: apricot, color: navy }}>
-            {t('hero.cta')} →
-          </a>
-        </div>
-      </section>
-
-      {/* ABOUT */}
-      <Section bg={paper}>
-        <div className="grid md:grid-cols-2 gap-10 md:gap-16 items-center">
-          <div>
-            <Overline>{t('about.overline')}</Overline>
-            <Title>{t('about.title')}</Title>
-            <p className="text-base md:text-lg mb-4" style={{ color: graytext, lineHeight: 1.7 }}>{t('about.p1')}</p>
-            <p className="text-base md:text-lg mb-4" style={{ color: graytext, lineHeight: 1.7 }}>{t('about.p2')}</p>
-            <p className="text-base md:text-lg italic" style={{ color: navy, lineHeight: 1.7 }}>{t('about.p3')}</p>
-          </div>
-          <div className="rounded-3xl overflow-hidden" style={{ aspectRatio: '4/5', boxShadow: '0 20px 60px rgba(11,29,74,0.15)' }}>
-            <img src={LANDING_IMAGES.about} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          </div>
-        </div>
-      </Section>
-
-      {/* MISSION & VISION */}
-      <Section bg={cream}>
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="rounded-3xl p-8 md:p-10" style={{ background: paper, border: `1px solid ${divider}` }}>
-            <Overline>{t('mission.overline')}</Overline>
-            <h3 className="text-2xl md:text-3xl font-serif mb-4" style={{ color: navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{t('mission.title')}</h3>
-            <p className="text-base md:text-lg" style={{ color: graytext, lineHeight: 1.7 }}>{t('mission.text')}</p>
-          </div>
-          <div className="rounded-3xl p-8 md:p-10" style={{ background: navy, color: paper }}>
-            <div className="text-[10px] md:text-xs tracking-[0.3em] font-semibold uppercase mb-3" style={{ color: apricot }}>{t('vision.overline')}</div>
-            <h3 className="text-2xl md:text-3xl font-serif mb-4" style={{ color: paper, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{t('vision.title')}</h3>
-            <p className="text-base md:text-lg opacity-90" style={{ lineHeight: 1.7 }}>{t('vision.text')}</p>
-          </div>
-        </div>
-      </Section>
-
-      {/* SERVICES */}
-      <Section bg={paper}>
-        <div className="text-center mb-12">
-          <Overline>{t('services.overline')}</Overline>
-          <Title>{t('services.title')}</Title>
-        </div>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {T.services.items.map((s, i) => {
-            const icons = [Home, Sparkles, Sparkles, Package, Building2, Building2, Clock];
-            const Icon = icons[i] || Sparkles;
-            return (
-              <div key={i} className="rounded-3xl p-6 md:p-7" style={{ background: cream, border: `1px solid ${divider}` }}>
-                <div className="w-11 h-11 rounded-full flex items-center justify-center mb-4" style={{ background: apricot }}>
-                  <Icon size={20} style={{ color: navy }} />
-                </div>
-                <h4 className="text-lg md:text-xl font-serif mb-1" style={{ color: navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{s.title}</h4>
-                <div className="text-[11px] md:text-xs italic mb-3" style={{ color: apricot }}>{s.tagline}</div>
-                <p className="text-sm" style={{ color: graytext, lineHeight: 1.6 }}>{s.desc}</p>
-              </div>
-            );
-          })}
-        </div>
-      </Section>
-
-      {/* ADDITIONAL SERVICES */}
-      <Section bg={cream}>
-        <div className="max-w-4xl mx-auto text-center mb-10">
-          <Overline>{t('additional.overline')}</Overline>
-          <Title>{t('additional.title')}</Title>
-          <p className="text-base md:text-lg" style={{ color: graytext, lineHeight: 1.7 }}>{t('additional.intro')}</p>
-        </div>
-        <div className="grid md:grid-cols-2 gap-4 max-w-4xl mx-auto">
-          {T.additional.items.map((item, i) => (
-            <div key={i} className="flex gap-4 p-5 rounded-2xl" style={{ background: paper }}>
-              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: cream, border: `1px solid ${apricot}` }}>
-                <CheckCircle2 size={14} style={{ color: apricot }} />
-              </div>
-              <div>
-                <div className="font-semibold text-sm mb-1" style={{ color: navy }}>{item.title}</div>
-                <div className="text-xs md:text-sm" style={{ color: graytext, lineHeight: 1.6 }}>{item.desc}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="text-center text-xs italic mt-8" style={{ color: graytext }}>{t('additional.note')}</div>
-      </Section>
-
-      {/* WHY US */}
-      <Section bg={paper}>
-        <div className="text-center mb-12">
-          <Overline>{t('why.overline')}</Overline>
-          <Title>{t('why.title')}</Title>
-        </div>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {T.why.items.map((item, i) => {
-            const icons = [ShieldCheck, Sparkles, User, ClipboardList, User, Clock];
-            const Icon = icons[i] || Sparkles;
-            return (
-              <div key={i} className="text-center p-6">
-                <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: cream, border: `1px solid ${apricot}` }}>
-                  <Icon size={22} style={{ color: apricot }} />
-                </div>
-                <h4 className="text-lg font-serif mb-2" style={{ color: navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{item.title}</h4>
-                <p className="text-sm" style={{ color: graytext, lineHeight: 1.6 }}>{item.desc}</p>
-              </div>
-            );
-          })}
-        </div>
-      </Section>
-
-      {/* SERVICE AREAS */}
-      <Section bg={cream}>
-        <div className="text-center mb-12">
-          <Overline>{t('areas.overline')}</Overline>
-          <Title>{t('areas.title')}</Title>
-        </div>
-        <div className="grid md:grid-cols-3 gap-5">
-          {[
-            { img: LANDING_IMAGES.toronto, data: T.areas.canada, hasCity2: true },
-            { img: LANDING_IMAGES.seattle, data: T.areas.usa, hasCity2: false },
-            { img: LANDING_IMAGES.guadalajara, data: T.areas.mexico, hasCity2: false },
-          ].map((area, i) => (
-            <div key={i} className="rounded-3xl overflow-hidden" style={{ background: paper, boxShadow: '0 8px 24px rgba(11,29,74,0.08)' }}>
-              <div style={{ height: 180, position: 'relative', overflow: 'hidden', background: navy }}>
-                <img src={area.img} alt={area.data.country}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(11,29,74,0.55), transparent 60%)' }} />
-                <div style={{ position: 'absolute', bottom: 10, left: 14, color: paper, fontFamily: "'Playfair Display', Georgia, serif", fontSize: 18, fontWeight: 500 }}>
-                  {area.data.country}
-                </div>
-              </div>
-              <div className="p-6">
-                <h3 className="text-xl md:text-2xl font-serif mb-4" style={{ color: navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{area.data.country}</h3>
-                <div className="mb-3">
-                  <div className="text-sm font-semibold mb-1" style={{ color: apricot }}>{area.data.city1}</div>
-                  <div className="text-xs" style={{ color: graytext, lineHeight: 1.6 }}>{area.data.regions1}</div>
-                </div>
-                {area.hasCity2 && (
-                  <div>
-                    <div className="text-sm font-semibold mb-1" style={{ color: apricot }}>{area.data.city2}</div>
-                    <div className="text-xs" style={{ color: graytext, lineHeight: 1.6 }}>{area.data.regions2}</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="text-center text-xs italic mt-8" style={{ color: graytext }}>{t('areas.note')}</div>
-      </Section>
-
-      {/* VALUES */}
-      <Section bg={paper}>
-        <div className="text-center mb-12">
-          <Overline>{t('values.overline')}</Overline>
-          <Title>{t('values.title')}</Title>
-        </div>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto">
-          {T.values.items.map((item, i) => (
-            <div key={i} className="p-6 rounded-2xl" style={{ background: cream }}>
-              <div className="text-[10px] tracking-[0.3em] font-bold mb-2" style={{ color: apricot }}>0{i + 1}</div>
-              <h4 className="text-lg font-serif mb-2" style={{ color: navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{item.title}</h4>
-              <p className="text-sm" style={{ color: graytext, lineHeight: 1.6 }}>{item.desc}</p>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      {/* HOW IT WORKS */}
-      <Section bg={cream}>
-        <div className="text-center mb-12">
-          <Overline>{t('how.overline')}</Overline>
-          <Title>{t('how.title')}</Title>
-        </div>
-        <div className="grid md:grid-cols-4 gap-6">
-          {T.how.items.map((item, i) => (
-            <div key={i} className="text-center relative">
-              <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5 text-2xl font-serif" style={{ background: navy, color: apricot, fontFamily: "'Playfair Display', Georgia, serif" }}>
-                {item.num}
-              </div>
-              <h4 className="text-base md:text-lg font-serif mb-2" style={{ color: navy, fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 500 }}>{item.title}</h4>
-              <p className="text-sm" style={{ color: graytext, lineHeight: 1.6 }}>{item.desc}</p>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      {/* TESTIMONIALS */}
-      <Section bg={paper}>
-        <div className="text-center mb-12">
-          <Overline>{t('testimonials.overline')}</Overline>
-          <Title>{t('testimonials.title')}</Title>
-          <p className="text-base md:text-lg max-w-2xl mx-auto" style={{ color: graytext, lineHeight: 1.7 }}>{t('testimonials.subtitle')}</p>
-        </div>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {REVIEWS.map((r, i) => (
-            <div key={i} className="rounded-3xl p-6 md:p-7 flex flex-col" style={{ background: cream, border: `1px solid ${divider}` }}>
-              <div className="flex gap-1 mb-4">
-                {[...Array(r.rating)].map((_, s) => (
-                  <span key={s} style={{ color: apricot, fontSize: 16 }}>★</span>
-                ))}
-              </div>
-              <p className="text-sm md:text-base italic mb-5 flex-1" style={{ color: charcoal, lineHeight: 1.7 }}>
-                "{lang === 'es' ? r.text_es : r.text_en}"
-              </p>
-              <div className="flex items-center gap-3 pt-4" style={{ borderTop: `1px solid ${divider}` }}>
-                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: navy, color: apricot, fontWeight: 'bold', fontSize: 13 }}>
-                  {r.name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
-                </div>
-                <div>
-                  <div className="text-sm font-semibold" style={{ color: navy }}>{r.name}</div>
-                  <div className="text-xs" style={{ color: graytext }}>{r.location}</div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      {/* CONTACT */}
-      <section className="relative overflow-hidden py-20 md:py-32">
-        <div className="absolute inset-0" style={{ backgroundImage: `url(${LANDING_IMAGES.contact})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(11,29,74,0.9) 0%, rgba(43,41,38,0.85) 100%)' }} />
-        <div className="relative max-w-3xl mx-auto px-5 md:px-8 text-center">
-          <div className="text-[10px] md:text-xs tracking-[0.3em] font-bold mb-4" style={{ color: apricot }}>{t('contact.overline')}</div>
-          <h2 className="text-3xl md:text-5xl font-serif text-white mb-5" style={{ fontFamily: "'Playfair Display', Georgia, serif", lineHeight: 1.2, fontWeight: 500 }}>{t('contact.title')}</h2>
-          <p className="text-base md:text-lg text-white/85 mb-8" style={{ lineHeight: 1.7 }}>{t('contact.subtitle')}</p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <a href={whatsappLink(t('whatsapp.msg'))} target="_blank" rel="noopener noreferrer" className="inline-block px-7 py-3.5 rounded-full text-xs md:text-sm font-bold tracking-wider" style={{ background: apricot, color: navy }}>
-              {t('contact.cta')} →
-            </a>
-            <a href="https://instagram.com/whitegloveps" target="_blank" rel="noopener noreferrer" className="inline-block px-7 py-3.5 rounded-full text-xs md:text-sm font-bold tracking-wider" style={{ background: 'transparent', color: paper, border: `1px solid ${paper}` }}>
-              @whitegloveps
-            </a>
-          </div>
-          <div className="text-xs md:text-sm italic mt-8" style={{ color: 'rgba(255,255,255,0.7)' }}>{t('contact.serving')}</div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer className="py-10 md:py-14" style={{ background: navy, color: paper }}>
-        <div className="max-w-6xl mx-auto px-5 md:px-8">
-          <div className="grid md:grid-cols-2 gap-8 mb-8">
-            <div>
-              <div className="inline-block rounded-2xl p-2 mb-3" style={{ background: paper }}>
-                <img src={LOGO_URI} alt="WhiteGlove" style={{ height: 36, display: 'block' }} />
-              </div>
-              <p className="text-sm italic" style={{ color: apricot }}>{t('footer.tag')}</p>
-            </div>
-            <div className="text-sm space-y-1 md:text-right" style={{ color: 'rgba(255,255,255,0.8)' }}>
-              <div>{t('footer.canada')}</div>
-              <div>{t('footer.usa')}</div>
-              <div>{t('footer.mexico')}</div>
-            </div>
-          </div>
-          <div className="text-xs pt-6" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.6)' }}>
-            <div className="mb-2">{t('footer.services')}</div>
-            <div>{t('footer.rights')}</div>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
-}
+  supabase,
+  fetchAllServices,
+  fetchStockByUnit,
+  fetchStockStorage,
+  seedStockByUnit,
+  seedStockStorage,
+  fetchRates,
+  fetchExtraClients,
+  fetchCleanersDb,
+  fetchSchedule,
+  addScheduleToDb,
+  updateScheduleInDb,
+  deleteScheduleFromDb,
+  logAction,
+  svcToDb,
+  BASE_UNITS,
+  BASE_CLEANERS,
+  UNIT_STOCK_TEMPLATE,
+  INITIAL_STOCK_STORAGE,
+  DEFAULT_RATES,
+} from './lib/supabase';
+import { hasFullAccess } from './lib/auth';
 
 export default function App() {
-  const [tab, setTab] = useState('home');
+  // Authentication
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const stored = localStorage.getItem('wg-current-user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Data states
   const [services, setServices] = useState([]);
-  const [stockByUnit, setStockByUnit] = useState(INITIAL_STOCK_BY_UNIT);
-  const [stockStorage, setStockStorage] = useState(INITIAL_STOCK_STORAGE);
-  const [showAdd, setShowAdd] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [authStep, setAuthStep] = useState('role');  // 'role' | 'adminLogin' | 'cleanerLogin'
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [authLoaded, setAuthLoaded] = useState(false);
-  const [editingService, setEditingService] = useState(null);
+  const [stockByUnit, setStockByUnit] = useState({});
+  const [stockStorage, setStockStorage] = useState([]);
   const [rates, setRates] = useState(DEFAULT_RATES);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showHistorial, setShowHistorial] = useState(false);
-  const [showAddClient, setShowAddClient] = useState(false);
-  const [showAddCleaner, setShowAddCleaner] = useState(false);
   const [extraClients, setExtraClients] = useState([]);
   const [cleanersDb, setCleanersDb] = useState([]);
   const [schedule, setSchedule] = useState([]);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [editingSchedule, setEditingSchedule] = useState(null);
-  const [showLanding, setShowLanding] = useState(true);
-  const [lang, setLang] = useState(() => {
-    try { const saved = localStorage.getItem('wg-lang'); return saved === 'es' ? 'es' : 'en'; } catch(e) { return 'en'; }
-  });
-  // Guardar idioma preferido
-  useEffect(() => { try { localStorage.setItem('wg-lang', lang); } catch(e) {} }, [lang]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const r = await window.storage.get('wg-current-user');
-        if (r?.value) {
-          const saved = JSON.parse(r.value);
-          if (saved.role === 'admin') {
-            const matchedKey = Object.keys(USERS).find((k) => k.toLowerCase() === (saved.username || '').toLowerCase());
-            if (matchedKey) {
-              setCurrentUser({ role: 'admin', username: matchedKey, displayName: USERS[matchedKey].displayName });
-            }
-          } else if (saved.role === 'cleaner' && CLEANERS.includes(saved.cleanerName)) {
-            setCurrentUser({ role: 'cleaner', cleanerName: saved.cleanerName, displayName: saved.cleanerName });
-          }
-        }
-      } catch (e) {}
-
-      // Load from Supabase (cloud-synced)
-      const [svcs, byUnit, storage, ratesData, extras, cleaners, sched] = await Promise.all([
-        fetchAllServices(),
-        fetchStockByUnit(UNITS, UNIT_STOCK_TEMPLATE),
-        fetchStockStorage(),
-        fetchRates(),
-        fetchExtraClients(),
-        fetchCleanersDb(),
-        fetchSchedule(),
-      ]);
-      setRates(ratesData);
-      setExtraClients(extras);
-      setCleanersDb(cleaners);
-      setSchedule(sched);
-      setServices(svcs);
-      if (byUnit) {
-        setStockByUnit(byUnit);
-      } else {
-        setStockByUnit(INITIAL_STOCK_BY_UNIT);
-        seedStockByUnit(UNITS, UNIT_STOCK_TEMPLATE);
-      }
-      if (storage) {
-        setStockStorage(storage);
-      } else {
-        setStockStorage(INITIAL_STOCK_STORAGE);
-        seedStockStorage(INITIAL_STOCK_STORAGE);
-      }
-      setAuthLoaded(true);
+  // UI Navigation & Modals
+  const [activeTab, setActiveTab] = useState(() => (currentUser?.role === 'cleaner' ? 'registro' : 'services'));
+  const [periodFilter, setPeriodFilter] = useState('all');
+  const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
+  const [serviceToEdit, setServiceToEdit] = useState(null);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [previewLanding, setPreviewLanding] = useState(false);
+  const [portalLang, setPortalLang] = useState(() => {
+    try {
+      return localStorage.getItem('wg-portal-lang') || 'es';
+    } catch {
+      return 'es';
     }
-    load();
+  });
 
-    // Realtime subscriptions — all clients update within seconds of any change
+  const handleSetPortalLang = (newLang) => {
+    setPortalLang(newLang);
+    try {
+      localStorage.setItem('wg-portal-lang', typeof newLang === 'function' ? newLang(portalLang) : newLang);
+    } catch (e) {
+      console.warn('Could not save language preference:', e);
+    }
+  };
+
+  // Toasts
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = (title, message, type = 'success') => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, title, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  const removeToast = (id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Merge base lists with dynamic database values
+  const availableUnits = useMemo(() => {
+    const merged = new Set([...BASE_UNITS, ...extraClients]);
+    return Array.from(merged).sort();
+  }, [extraClients]);
+
+  const availableCleaners = useMemo(() => {
+    const fromDb = cleanersDb.map((c) => c.name);
+    const merged = new Set([...BASE_CLEANERS, ...fromDb]);
+    return Array.from(merged).sort();
+  }, [cleanersDb]);
+
+  // Initial Data Loading & Realtime subscriptions
+  useEffect(() => {
+    async function loadAllData() {
+      setLoading(true);
+      try {
+        const [svcs, byUnit, storage, ratesData, extras, cleaners, sched] = await Promise.all([
+          fetchAllServices(),
+          fetchStockByUnit(BASE_UNITS, UNIT_STOCK_TEMPLATE),
+          fetchStockStorage(),
+          fetchRates(),
+          fetchExtraClients(),
+          fetchCleanersDb(),
+          fetchSchedule(),
+        ]);
+
+        setServices(svcs);
+        setRates(ratesData);
+        setExtraClients(extras);
+        setCleanersDb(cleaners);
+        setSchedule(sched);
+
+        if (byUnit) {
+          setStockByUnit(byUnit);
+        } else {
+          const initByUnit = BASE_UNITS.reduce((acc, u) => {
+            acc[u] = UNIT_STOCK_TEMPLATE.map((it, i) => ({ ...it, id: `${u}-${i}` }));
+            return acc;
+          }, {});
+          setStockByUnit(initByUnit);
+          seedStockByUnit(BASE_UNITS, UNIT_STOCK_TEMPLATE);
+        }
+
+        if (storage) {
+          setStockStorage(storage);
+        } else {
+          setStockStorage(INITIAL_STOCK_STORAGE);
+          seedStockStorage(INITIAL_STOCK_STORAGE);
+        }
+      } catch (err) {
+        console.error('Data loading error:', err);
+        addToast('Conexión', 'Usando datos locales temporales mientras se sincroniza.', 'info');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadAllData();
+
+    // Realtime channel
     const ch = supabase
-      .channel('wg-changes')
+      .channel('whiteglove-suite')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'services' }, async () => {
         setServices(await fetchAllServices());
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_by_unit' }, async () => {
-        const next = await fetchStockByUnit(UNITS, UNIT_STOCK_TEMPLATE);
+        const next = await fetchStockByUnit(BASE_UNITS, UNIT_STOCK_TEMPLATE);
         if (next) setStockByUnit(next);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_storage' }, async () => {
         const next = await fetchStockStorage();
         if (next) setStockStorage(next);
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, async () => {
-        setRates(await fetchRates());
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, async () => {
-        setExtraClients(await fetchExtraClients());
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
+        setSchedule(await fetchSchedule());
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cleaners_db' }, async () => {
         setCleanersDb(await fetchCleanersDb());
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
-        setSchedule(await fetchSchedule());
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, async () => {
+        setExtraClients(await fetchExtraClients());
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, []);
 
-  async function handleLogin(user) {
+  // Auth actions
+  const handleLoginSuccess = (user) => {
     setCurrentUser(user);
-    if (user.role === 'cleaner') setTab('registro');
-    try { await window.storage.set('wg-current-user', JSON.stringify(user)); } catch (e) {}
-  }
-  async function handleLogout() {
+    try {
+      localStorage.setItem('wg-current-user', JSON.stringify(user));
+    } catch {}
+    setActiveTab(user.role === 'cleaner' ? 'registro' : 'services');
+    addToast('Bienvenido', `Sesión iniciada como ${user.displayName || user.username}`);
+  };
+
+  const handleLogout = () => {
     setCurrentUser(null);
-    setShowUserMenu(false);
-    setAuthStep('role');
-    setTab('home');
-    setShowLanding(true);
-    try { await window.storage.delete('wg-current-user'); } catch (e) {}
-  }
+    try {
+      localStorage.removeItem('wg-current-user');
+    } catch {}
+    addToast('Sesión Finalizada', 'Has cerrado sesión exitosamente.');
+  };
 
-  async function addService(svc) {
-    setServices([svc, ...services]);
-    setShowAdd(false);
-    setTab('registro');
-    const { error } = await supabase.from('services').insert(svcToDb(svc));
-    if (error) { console.error('insert service', error); alert('Error al guardar: ' + error.message); return; }
-    logAction({
-      user_name: currentUser?.displayName || currentUser?.username || 'desconocido',
-      action: 'created', entity: 'service', entity_id: String(svc.id),
-      summary: `Nuevo servicio · ${svcSummary(svc)}`,
-    });
-  }
-  async function updateService(updated) {
-    const oldSvc = services.find((s) => s.id === updated.id);
-    setServices(services.map((s) => s.id === updated.id ? updated : s));
-    setEditingService(null);
-    setShowAdd(false);
-    const { error } = await supabase.from('services').update(svcToDb(updated)).eq('id', updated.id);
-    if (error) { console.error('update service', error); alert('Error al actualizar: ' + error.message); return; }
-    if (oldSvc) {
-      const changes = diffService(oldSvc, updated);
-      if (changes.length > 0) {
-        logAction({
-          user_name: currentUser?.displayName || currentUser?.username || 'desconocido',
-          action: 'updated', entity: 'service', entity_id: String(updated.id),
-          summary: `Editó ${svcSummary(updated)} · ${changes.join('; ')}`,
-        });
-      }
+  const verifyCleanerPassword = async (cleanerName, enteredPassword) => {
+    const found = cleanersDb.find((c) => c.name.toLowerCase() === cleanerName.toLowerCase());
+    if (found) {
+      return (found.password || '').trim().toLowerCase() === (enteredPassword || '').trim().toLowerCase();
     }
-  }
-  async function deleteService(id) {
-    const oldSvc = services.find((s) => s.id === id);
-    setServices(services.filter((s) => s.id !== id));
-    const { error } = await supabase.from('services').delete().eq('id', id);
-    if (error) { console.error('delete service', error); return; }
-    if (oldSvc) {
-      logAction({
-        user_name: currentUser?.displayName || currentUser?.username || 'desconocido',
-        action: 'deleted', entity: 'service', entity_id: String(id),
-        summary: `Eliminó · ${svcSummary(oldSvc)}`,
-      });
+    // Default fallback: name in lowercase
+    return cleanerName.toLowerCase() === (enteredPassword || '').trim().toLowerCase();
+  };
+
+  // Service Management
+  const handleOpenNewService = (prefill = null) => {
+    if (prefill) {
+      setServiceToEdit(prefill);
+    } else {
+      setServiceToEdit(null);
     }
-  }
-  async function updateRates(nextRates) {
-    setRates(nextRates);
-    await saveRates(nextRates);
-  }
+    setIsServiceModalOpen(true);
+  };
 
-  async function addClient(name) {
-    const trimmed = (name || '').trim();
-    if (!trimmed) return;
+  const handleEditService = (service) => {
+    setServiceToEdit(service);
+    setIsServiceModalOpen(true);
+  };
+
+  const handleCancelService = async (id, newStatus = 'cancelado') => {
     try {
-      await addClientToDb(trimmed);
-      setExtraClients(await fetchExtraClients());
+      const targetService = services.find((s) => s.id === id);
+      if (!targetService) return;
+      const updated = { ...targetService, status: newStatus };
+      const dbRow = svcToDb(updated);
+      const { error } = await supabase.from('services').update(dbRow).eq('id', id);
+      if (error) throw error;
+      setServices((prev) => prev.map((s) => (s.id === id ? updated : s)));
+      addToast(
+        'Servicio',
+        newStatus === 'cancelado' ? 'Servicio cancelado exitosamente.' : 'Servicio reactivado.'
+      );
       logAction({
-        user_name: currentUser?.displayName || 'desconocido',
-        action: 'created', entity: 'client', entity_id: trimmed,
-        summary: `Agregó cliente nuevo · ${trimmed}`,
+        actor: currentUser?.displayName || currentUser?.username,
+        action: newStatus === 'cancelado' ? 'CANCEL_SERVICE' : 'REACTIVATE_SERVICE',
+        details: `${newStatus === 'cancelado' ? 'Canceló' : 'Reactivó'} servicio en ${targetService.unidad}`,
       });
-    } catch (e) { alert('Error: ' + (e.message || 'no se pudo agregar')); }
-  }
+    } catch (err) {
+      console.error('Cancel service error:', err);
+      addToast('Error', 'No se pudo actualizar el estado del servicio.', 'error');
+    }
+  };
 
-  async function addCleaner(name, password) {
-    const trimmed = (name || '').trim();
-    const pass = (password || '').trim();
-    if (!trimmed || !pass) return;
+  const handleSaveService = async (serviceData) => {
     try {
-      await addCleanerToDb(trimmed, pass);
-      setCleanersDb(await fetchCleanersDb());
-      logAction({
-        user_name: currentUser?.displayName || 'desconocido',
-        action: 'created', entity: 'cleaner', entity_id: trimmed,
-        summary: `Agregó cleaner nuevo · ${trimmed}`,
-      });
-    } catch (e) { alert('Error: ' + (e.message || 'no se pudo agregar')); }
-  }
+      const isEdit = services.some((s) => s.id === serviceData.id);
+      const dbRow = svcToDb(serviceData);
 
-  async function saveSchedule(entry) {
-    try {
-      if (entry.id) {
-        const { id, ...patch } = entry;
-        await updateScheduleInDb(id, patch);
+      if (isEdit) {
+        const { error } = await supabase.from('services').update(dbRow).eq('id', serviceData.id);
+        if (error) throw error;
+        setServices((prev) => prev.map((s) => (s.id === serviceData.id ? serviceData : s)));
+        addToast('Actualizado', `Servicio en ${serviceData.unidad} actualizado con éxito.`);
         logAction({
-          user_name: currentUser?.displayName || 'desconocido',
-          action: 'updated', entity: 'schedule', entity_id: String(id),
-          summary: `Editó agenda · ${entry.fecha} ${entry.hora || ''} · ${entry.unidad}`,
+          actor: currentUser?.displayName || currentUser?.username,
+          action: 'UPDATE_SERVICE',
+          details: `Modificó servicio #${serviceData.id} (${serviceData.unidad})`,
         });
       } else {
-        const created = await addScheduleToDb(entry);
+        const { error } = await supabase.from('services').insert(dbRow);
+        if (error) throw error;
+        setServices((prev) => [serviceData, ...prev]);
+        addToast('Registrado', `Servicio en ${serviceData.unidad} guardado en la nube.`);
         logAction({
-          user_name: currentUser?.displayName || 'desconocido',
-          action: 'created', entity: 'schedule', entity_id: String(created?.id || ''),
-          summary: `Programó servicio · ${entry.fecha} ${entry.hora || ''} · ${entry.unidad} (${(entry.cleaners || []).join(', ')})`,
+          actor: currentUser?.displayName || currentUser?.username,
+          action: 'CREATE_SERVICE',
+          details: `Creó servicio en ${serviceData.unidad} por ${serviceData.horas}h`,
         });
       }
-      setSchedule(await fetchSchedule());
-      setShowScheduleModal(false);
-      setEditingSchedule(null);
-    } catch (e) { alert('Error: ' + (e.message || 'no se pudo guardar')); }
-  }
 
-  async function deleteSchedule(id) {
-    const item = schedule.find((s) => s.id === id);
+      setIsServiceModalOpen(false);
+    } catch (err) {
+      console.error('Save service error:', err);
+      addToast('Error', 'No se pudo guardar el servicio. Verifica la conexión.', 'error');
+    }
+  };
+
+  const handleDeleteService = async (id) => {
+    if (!window.confirm('¿Confirmas que deseas eliminar este servicio?')) return;
+    try {
+      const { error } = await supabase.from('services').delete().eq('id', id);
+      if (error) throw error;
+      setServices((prev) => prev.filter((s) => s.id !== id));
+      addToast('Eliminado', 'El servicio ha sido removido.', 'info');
+      logAction({
+        actor: currentUser?.displayName || currentUser?.username,
+        action: 'DELETE_SERVICE',
+        details: `Eliminó el servicio #${id}`,
+      });
+    } catch (err) {
+      console.error('Delete service error:', err);
+      addToast('Error', 'No se pudo eliminar el servicio.', 'error');
+    }
+  };
+
+  // Inventory Management
+  const handleUpdateStockByUnit = async (unit, nextItems) => {
+    setStockByUnit((prev) => ({ ...prev, [unit]: nextItems }));
+    try {
+      const rows = nextItems.map((item) => ({
+        id: item.id,
+        unidad: unit,
+        categoria: item.cat,
+        producto: item.prod,
+        unidad_medida: item.unit,
+        qty: item.qty,
+        min_qty: item.min,
+      }));
+      const { error } = await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
+      if (error) throw error;
+      addToast('Inventario', `Stock de ${unit} actualizado.`);
+    } catch (err) {
+      console.error('Stock unit update err:', err);
+      addToast('Error', 'No se pudo sincronizar el inventario.', 'error');
+    }
+  };
+
+  const handleUpdateStockStorage = async (nextItems) => {
+    setStockStorage(nextItems);
+    try {
+      const rows = nextItems.map((item) => ({
+        id: item.id,
+        categoria: item.cat,
+        producto: item.prod,
+        unidad_medida: item.unit,
+        qty: item.qty,
+        min_qty: item.min,
+      }));
+      const { error } = await supabase.from('stock_storage').upsert(rows, { onConflict: 'id' });
+      if (error) throw error;
+      addToast('Almacén', 'Stock de almacén central actualizado.');
+    } catch (err) {
+      console.error('Stock storage update err:', err);
+      addToast('Error', 'No se pudo sincronizar el almacén.', 'error');
+    }
+  };
+
+  // Schedule Management
+  const handleAddSchedule = async (entry) => {
+    try {
+      const created = await addScheduleToDb(entry);
+      setSchedule((prev) => [...prev, created]);
+      addToast('Turno Agendado', `Asignado a ${entry.cleaner} en ${entry.unidad}.`);
+    } catch (err) {
+      console.error('Schedule add err:', err);
+      addToast('Error', 'No se pudo agendar el turno.', 'error');
+    }
+  };
+
+  const handleUpdateSchedule = async (id, patch) => {
+    try {
+      await updateScheduleInDb(id, patch);
+      setSchedule((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+      addToast('Agenda', 'Estado de turno actualizado.');
+    } catch (err) {
+      console.error('Schedule update err:', err);
+      addToast('Error', 'No se pudo actualizar el turno.', 'error');
+    }
+  };
+
+  const handleDeleteSchedule = async (id) => {
     try {
       await deleteScheduleFromDb(id);
-      setSchedule(schedule.filter((s) => s.id !== id));
-      if (item) {
-        logAction({
-          user_name: currentUser?.displayName || 'desconocido',
-          action: 'deleted', entity: 'schedule', entity_id: String(id),
-          summary: `Eliminó agenda · ${item.fecha} ${item.hora || ''} · ${item.unidad}`,
-        });
-      }
-    } catch (e) { alert('Error: ' + (e.message || 'no se pudo eliminar')); }
-  }
-  function openEdit(svc) {
-    setEditingService(svc);
-    setShowAdd(true);
-  }
-  async function updateUnitStock(unitName, id, qty) {
-    setStockByUnit({ ...stockByUnit, [unitName]: (stockByUnit[unitName] || []).map((i) => i.id === id ? { ...i, qty } : i) });
-    const { error } = await supabase.from('stock_by_unit').update({ qty }).eq('id', id);
-    if (error) console.error('update stock_by_unit', error);
-  }
-  async function updateStorage(id, qty) {
-    setStockStorage(stockStorage.map((i) => i.id === id ? { ...i, qty } : i));
-    const { error } = await supabase.from('stock_storage').update({ qty }).eq('id', id);
-    if (error) console.error('update stock_storage', error);
-  }
+      setSchedule((prev) => prev.filter((s) => s.id !== id));
+      addToast('Agenda', 'Turno eliminado.');
+    } catch (err) {
+      console.error('Schedule delete err:', err);
+      addToast('Error', 'No se pudo eliminar el turno.', 'error');
+    }
+  };
 
-  const globalStyle = (
-    <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600&display=swap');
-      select { background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236B6560' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 1rem center; background-size: 1em; padding-right: 2.5rem; }
-      input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
-    `}</style>
-  );
-
-  if (!authLoaded) {
-    return <div className="min-h-screen w-full flex items-center justify-center" style={{ background: c.cream }}>{globalStyle}</div>;
-  }
-
-  // Visitors see the landing page first (public)
-  const allCleanersInit = [...new Set([...CLEANERS, ...cleanersDb.map((c) => c.name)])];
-
-  if (!currentUser && showLanding) {
-    return (
-      <div>
-        {globalStyle}
-        <Landing lang={lang} setLang={setLang} onLogin={() => setShowLanding(false)} />
-      </div>
-    );
-  }
-
+  // If not logged in, render Landing Page or Login Modal
   if (!currentUser) {
     return (
-      <div>
-        {globalStyle}
-        {authStep === 'role' && <RoleSelector onPick={(r) => setAuthStep(r === 'admin' ? 'adminLogin' : 'cleanerLogin')} onBack={() => setShowLanding(true)} />}
-        {authStep === 'adminLogin' && <AdminLogin onLogin={handleLogin} onBack={() => setAuthStep('role')} />}
-        {authStep === 'cleanerLogin' && <CleanerLogin onLogin={handleLogin} onBack={() => setAuthStep('role')} cleanersDb={cleanersDb} allCleaners={allCleanersInit} />}
+      <>
+        {showAuthModal ? (
+          <LoginView
+            onLoginSuccess={handleLoginSuccess}
+            cleanersList={availableCleaners}
+            onVerifyCleanerPassword={verifyCleanerPassword}
+            onBackToLanding={() => setShowAuthModal(false)}
+          />
+        ) : (
+          <LandingView onGoToLogin={() => setShowAuthModal(true)} />
+        )}
+        <Toast toasts={toasts} onDismiss={removeToast} />
+      </>
+    );
+  }
+
+  if (previewLanding) {
+    return (
+      <div className="relative">
+        <div className="fixed top-20 right-6 z-50">
+          <button
+            onClick={() => setPreviewLanding(false)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-xl hover:brightness-105 active:scale-[0.98] transition-all"
+          >
+            ← Volver al Panel
+          </button>
+        </div>
+        <LandingView onGoToLogin={() => setPreviewLanding(false)} />
       </div>
     );
   }
 
-  const isCleaner = currentUser.role === 'cleaner';
-  // Merge default UNITS/CLEANERS with ones added by admin (deduped)
-  const allClients = [...new Set([...UNITS, ...extraClients])];
-  const allCleaners = [...new Set([...CLEANERS, ...cleanersDb.map((c) => c.name)])];
-  // Force registro tab for cleaners
-  const activeTab = isCleaner ? 'registro' : tab;
+  const showFinancials = hasFullAccess(currentUser);
 
   return (
-    <div className="min-h-screen w-full flex justify-center" style={{ background: c.cream }}>
-      {globalStyle}
-      <div className="w-full max-w-md md:max-w-3xl lg:max-w-5xl xl:max-w-6xl relative pb-32" style={{ background: c.cream, minHeight: '100vh' }}>
-        {!isCleaner && activeTab === 'home' && <HomeTab services={services} setTab={setTab} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
-        {activeTab === 'registro' && <RegistroTab services={services} onDelete={deleteService} onEdit={openEdit} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allCleaners={allCleaners} />}
-        {!isCleaner && activeTab === 'graficas' && <GraficasTab services={services} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} />}
-        {!isCleaner && activeTab === 'stock' && <StockTab stockByUnit={stockByUnit} stockStorage={stockStorage} updateUnitStock={updateUnitStock} updateStorage={updateStorage} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} allClients={allClients} />}
-        {!isCleaner && activeTab === 'calendario' && <CalendarioTab schedule={schedule} currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} onOpenNew={() => { setEditingSchedule(null); setShowScheduleModal(true); }} onEdit={(it) => { setEditingSchedule(it); setShowScheduleModal(true); }} onDelete={deleteSchedule} allClients={allClients} allCleaners={allCleaners} />}
-        {!isCleaner && activeTab === 'menu' && <MenuTab currentUser={currentUser} onOpenMenu={() => setShowUserMenu(true)} setTab={setTab} onOpenHistorial={() => setShowHistorial(true)} onOpenSettings={() => setShowSettings(true)} onOpenAddClient={() => setShowAddClient(true)} onOpenAddCleaner={() => setShowAddCleaner(true)} onLogout={handleLogout} />}
-        <BottomNav tab={activeTab} setTab={setTab} onAdd={() => setShowAdd(true)} isCleaner={isCleaner} />
-        {showAdd && <AddServiceModal onClose={() => { setShowAdd(false); setEditingService(null); }} onSave={addService} onUpdate={updateService} currentUser={currentUser} existingService={editingService} rates={rates} unitsList={allClients} cleanersList={allCleaners} />}
-        {showUserMenu && <UserMenu user={currentUser} onLogout={handleLogout} onClose={() => setShowUserMenu(false)} onOpenSettings={() => { setShowUserMenu(false); setShowSettings(true); }} onOpenHistorial={() => { setShowUserMenu(false); setShowHistorial(true); }} onOpenAddClient={() => { setShowUserMenu(false); setShowAddClient(true); }} onOpenAddCleaner={() => { setShowUserMenu(false); setShowAddCleaner(true); }} />}
-        {showSettings && <SettingsModal initialRates={rates} onClose={() => setShowSettings(false)} onSave={updateRates} />}
-        {showHistorial && <HistorialModal onClose={() => setShowHistorial(false)} />}
-        {showAddClient && <AddClientModal onClose={() => setShowAddClient(false)} onSave={addClient} existingClients={allClients} />}
-        {showAddCleaner && <AddCleanerModal onClose={() => setShowAddCleaner(false)} onSave={addCleaner} existingCleaners={allCleaners} />}
-        {showScheduleModal && <ScheduleModal onClose={() => { setShowScheduleModal(false); setEditingSchedule(null); }} onSave={saveSchedule} existing={editingSchedule} unitsList={allClients} cleanersList={allCleaners} />}
-      </div>
+    <div className="min-h-screen bg-[#FBF9F5] text-[#0B1D4A] flex flex-col pb-20 md:pb-12 w-full max-w-full overflow-x-hidden">
+      {/* Adaptive Luxury Navbar with consolidated user menu */}
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onOpenNewService={handleOpenNewService}
+        onOpenAuditLog={() => setIsAuditModalOpen(true)}
+        onPreviewLanding={() => setPreviewLanding(true)}
+        lang={portalLang}
+        setLang={handleSetPortalLang}
+      />
+
+      {/* Main Container */}
+      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1">
+        
+        {/* KPI Strip (Visible on Services & Analytics tabs for supervisors) */}
+        {currentUser.role === 'admin' && (activeTab === 'services' || activeTab === 'analytics') && (
+          <StatsCards
+            services={services}
+            showFinances={showFinancials}
+            periodFilter={periodFilter}
+            setPeriodFilter={setPeriodFilter}
+          />
+        )}
+
+        {/* Tab Content Routing */}
+        {activeTab === 'services' && (
+          <ServicesList
+            services={services}
+            currentUser={currentUser}
+            onEditService={handleEditService}
+            onCancelService={handleCancelService}
+            onDeleteService={handleDeleteService}
+            onOpenNewService={handleOpenNewService}
+          />
+        )}
+
+        {activeTab === 'registro' && (
+          /* Personal cleaner view of their logged hours */
+          <div className="space-y-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-serif font-semibold text-[#0B1D4A]">
+                  Mis Turnos Realizados ({currentUser.displayName || currentUser.username})
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Historial de horas trabajadas registradas en el sistema para tu nómina
+                </p>
+              </div>
+              <button
+                onClick={() => handleOpenNewService({
+                  cleaner: currentUser.displayName || currentUser.username,
+                  cleaners: [currentUser.displayName || currentUser.username]
+                })}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl hover:brightness-105 active:scale-98 transition-all shadow-xs shrink-0"
+              >
+                + Registrar Mi Servicio
+              </button>
+            </div>
+            <ServicesList
+              services={services}
+              currentUser={currentUser}
+              onEditService={() => {}}
+              onCancelService={() => {}}
+              onDeleteService={() => {}}
+              onOpenNewService={() => handleOpenNewService({
+                cleaner: currentUser.displayName || currentUser.username,
+                cleaners: [currentUser.displayName || currentUser.username]
+              })}
+            />
+          </div>
+        )}
+
+        {activeTab === 'inventory' && (
+          <InventoryView
+            stockByUnit={stockByUnit}
+            stockStorage={stockStorage}
+            availableUnits={availableUnits}
+            onUpdateStockByUnit={handleUpdateStockByUnit}
+            onUpdateStockStorage={handleUpdateStockStorage}
+          />
+        )}
+
+        {activeTab === 'schedule' && (
+          <ScheduleView
+            schedule={schedule}
+            availableUnits={availableUnits}
+            availableCleaners={availableCleaners}
+            onAddSchedule={handleAddSchedule}
+            onUpdateSchedule={handleUpdateSchedule}
+            onDeleteSchedule={handleDeleteSchedule}
+            onOpenNewService={handleOpenNewService}
+            currentUser={currentUser}
+          />
+        )}
+
+        {activeTab === 'payroll' && currentUser.role === 'admin' && (
+          <PayrollView
+            services={services}
+            cleaners={availableCleaners}
+            periodFilter={periodFilter}
+            setPeriodFilter={setPeriodFilter}
+            onEditService={handleEditService}
+            onCancelService={handleCancelService}
+          />
+        )}
+
+        {activeTab === 'analytics' && showFinancials && (
+          <AnalyticsView services={services} />
+        )}
+      </main>
+
+      {/* Service Modal (Create & Edit) */}
+      <ServiceModal
+        isOpen={isServiceModalOpen}
+        onClose={() => setIsServiceModalOpen(false)}
+        serviceToEdit={serviceToEdit}
+        onSave={handleSaveService}
+        availableUnits={availableUnits}
+        availableCleaners={availableCleaners}
+        rates={rates}
+        currentUser={currentUser}
+      />
+
+      {/* Audit Log Modal */}
+      <AuditLogModal
+        isOpen={isAuditModalOpen}
+        onClose={() => setIsAuditModalOpen(false)}
+      />
+
+      {/* Global Toast Notifications */}
+      <Toast toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }
