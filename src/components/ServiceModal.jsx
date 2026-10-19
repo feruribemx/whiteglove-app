@@ -13,6 +13,7 @@ export default function ServiceModal({
   serviceToEdit,
   onSave,
   onAddClient,
+  onOpenAddCleaner,
   availableUnits,
   availableCleaners,
   rates,
@@ -577,9 +578,21 @@ export default function ServiceModal({
 
           {/* Cleaners Selection (Locked exclusively to logged in cleaner if isCleaner) */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              {isCleaner ? 'Cleaner Asignado' : `Cleaners Asignados (${selectedCleaners.length})`}
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-slate-700">
+                {isCleaner ? 'Cleaner Asignado' : `Cleaners Asignados (${selectedCleaners.length})`}
+              </label>
+              {!isCleaner && onOpenAddCleaner && (
+                <button
+                  type="button"
+                  onClick={onOpenAddCleaner}
+                  className="text-[11px] font-bold text-[#0B1D4A] hover:text-[#1E3670] bg-[#FFB566]/20 border border-[#FFB566]/60 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                  title="Registrar nuevo cleaner en el equipo"
+                >
+                  + Nuevo Cleaner
+                </button>
+              )}
+            </div>
             {isCleaner ? (
               <div className="p-3 bg-amber-50 rounded-2xl border border-amber-300 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">

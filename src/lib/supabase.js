@@ -247,9 +247,19 @@ export async function fetchCleanersDb() {
   }
 }
 
-export async function addCleanerToDb(name, password) {
-  const { error } = await supabase.from('cleaners_db').insert({ name, password });
-  if (error) throw error;
+export async function addCleanerToDb(cleanerInput, optionalPassword) {
+  const name = typeof cleanerInput === 'string' ? cleanerInput.trim() : (cleanerInput?.name || '').trim();
+  const password = typeof cleanerInput === 'string' ? (optionalPassword || name.toLowerCase()) : (cleanerInput?.password || name.toLowerCase());
+  if (!name) return;
+  try {
+    const { error } = await supabase.from('cleaners_db').insert({ name, password });
+    if (error && error.code !== '23505') {
+      console.warn('cleaners_db insert error:', error);
+    }
+  } catch (err) {
+    console.warn('cleaners_db insert exception:', err);
+  }
+  return { name, password };
 }
 
 export const scheduleFromDb = (r) => {

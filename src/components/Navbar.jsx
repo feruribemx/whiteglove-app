@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ClipboardList, Package, Calendar, BarChart3, DollarSign,
   Plus, LogOut, User, Menu, X, Shield, History, Globe,
-  ChevronDown, Check, Sparkles, ExternalLink
+  ChevronDown, Check, Sparkles, ExternalLink, UserPlus
 } from 'lucide-react';
 import { initialsOf, hasFullAccess } from '../lib/auth';
 
@@ -13,6 +13,7 @@ export default function Navbar({
   onLogout,
   onOpenNewService,
   onOpenAuditLog,
+  onOpenAddCleaner,
   onPreviewLanding,
   lang = 'es',
   setLang,
@@ -197,25 +198,49 @@ export default function Navbar({
                   {/* Section A: Navigation & Admin Tools */}
                   <div className="p-2 space-y-1">
                     {isAdmin && (
-                      <button
-                        onClick={() => {
-                          setUserDropdownOpen(false);
-                          if (onOpenAuditLog) onOpenAuditLog();
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
-                      >
-                        <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-amber-300 shrink-0">
-                          <History className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1">
-                          <span className="block font-semibold">
-                            {lang === 'en' ? 'Audit Log & Change History' : 'Historial de Auditoría & Cambios'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 block font-normal">
-                            {lang === 'en' ? 'Track all registered actions and edits' : 'Monitorea ediciones y servicios capturados'}
-                          </span>
-                        </div>
-                      </button>
+                      <>
+                        {onOpenAddCleaner && (
+                          <button
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              onOpenAddCleaner();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
+                          >
+                            <div className="w-7 h-7 rounded-lg bg-[#FFB566]/20 flex items-center justify-center text-[#FFB566] shrink-0">
+                              <UserPlus className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                              <span className="block font-semibold">
+                                {lang === 'en' ? 'Add New Cleaner' : 'Registrar Nuevo Cleaner'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block font-normal">
+                                {lang === 'en' ? 'Register new staff members for shifts & payroll' : 'Agrega un nuevo elemento al equipo de operaciones'}
+                              </span>
+                            </div>
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            setUserDropdownOpen(false);
+                            if (onOpenAuditLog) onOpenAuditLog();
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
+                        >
+                          <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-amber-300 shrink-0">
+                            <History className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="block font-semibold">
+                              {lang === 'en' ? 'Audit Log & Change History' : 'Historial de Auditoría & Cambios'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block font-normal">
+                              {lang === 'en' ? 'Track all registered actions and edits' : 'Monitorea ediciones y servicios capturados'}
+                            </span>
+                          </div>
+                        </button>
+                      </>
                     )}
 
                     {onPreviewLanding && (
@@ -371,6 +396,19 @@ export default function Navbar({
                     <Plus className="w-4 h-4 stroke-[3]" />
                     <span>{lang === 'en' ? 'New Service Entry' : 'Capturar Nuevo Servicio'}</span>
                   </button>
+
+                  {onOpenAddCleaner && (
+                    <button
+                      onClick={() => {
+                        onOpenAddCleaner();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 rounded-xl"
+                    >
+                      <UserPlus className="w-4 h-4 text-[#FFB566]" />
+                      <span>{lang === 'en' ? 'Register New Cleaner' : 'Registrar Nuevo Cleaner'}</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => {

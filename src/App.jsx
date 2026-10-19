@@ -8,6 +8,7 @@ import ScheduleView from './components/ScheduleView';
 import PayrollView from './components/PayrollView';
 import AnalyticsView from './components/AnalyticsView';
 import AuditLogModal from './components/AuditLogModal';
+import AddCleanerModal from './components/AddCleanerModal';
 import LoginView from './components/LoginView';
 import LandingView from './components/LandingView';
 import Toast from './components/Toast';
@@ -23,6 +24,7 @@ import {
   fetchExtraClients,
   addClientToDb,
   fetchCleanersDb,
+  addCleanerToDb,
   fetchSchedule,
   addScheduleToDb,
   updateScheduleInDb,
@@ -79,6 +81,7 @@ export default function App() {
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState(null);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isAddCleanerModalOpen, setIsAddCleanerModalOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [previewLanding, setPreviewLanding] = useState(false);
   const [portalLang, setPortalLang] = useState(() => {
@@ -140,10 +143,23 @@ export default function App() {
           fetchSchedule(),
         ]);
 
+        let localCleaners = [];
+        try {
+          localCleaners = JSON.parse(localStorage.getItem('wg_extra_cleaners') || '[]');
+        } catch {}
+
+        const mergedMap = new Map();
+        (cleaners || []).forEach((c) => mergedMap.set((c.name || '').toLowerCase(), c));
+        localCleaners.forEach((c) => {
+          if (c && c.name && !mergedMap.has(c.name.toLowerCase())) {
+            mergedMap.set(c.name.toLowerCase(), c);
+          }
+        });
+
         setServices(svcs);
         setRates(ratesData);
         setExtraClients(extras);
-        setCleanersDb(cleaners);
+        setCleanersDb(Array.from(mergedMap.values()));
         setSchedule(sched);
 
         if (byUnit) {
@@ -386,6 +402,56 @@ export default function App() {
     return clientName;
   };
 
+  // Cleaner Management
+  const handleAddCleaner = async (cleanerData) => {
+    const cleanerName = typeof cleanerData === 'string' ? cleanerData.trim() : (cleanerData?.name || '').trim();
+    if (!cleanerName) return null;
+
+    const password = typeof cleanerData === 'object' && cleanerData.password ? cleanerData.password.trim() : cleanerName.toLowerCase();
+    const phone = typeof cleanerData === 'object' ? (cleanerData.phone || '').trim() : '';
+    const notes = typeof cleanerData === 'object' ? (cleanerData.notes || '').trim() : '';
+
+    const newCleanerObj = {
+      name: cleanerName,
+      password,
+      phone,
+      notes,
+    };
+
+    // Update cleanersDb state immediately
+    setCleanersDb((prev) => {
+      const exists = prev.some((c) => (c.name || '').toLowerCase() === cleanerName.toLowerCase());
+      if (exists) return prev;
+      return [...prev, newCleanerObj];
+    });
+
+    // Save to localStorage for instant local resilience across reloads
+    try {
+      const stored = JSON.parse(localStorage.getItem('wg_extra_cleaners') || '[]');
+      const filtered = stored.filter((c) => (c?.name || '').toLowerCase() !== cleanerName.toLowerCase());
+      localStorage.setItem('wg_extra_cleaners', JSON.stringify([...filtered, newCleanerObj]));
+    } catch (e) {
+      console.warn('Could not persist to localStorage:', e);
+    }
+
+    // Persist to database if available
+    try {
+      await addCleanerToDb(cleanerName, password);
+      addToast('Nuevo Cleaner', `Cleaner "${cleanerName}" registrado exitosamente en el equipo.`);
+      logAction({
+        usuario: currentUser?.username || 'admin',
+        rol: currentUser?.role || 'admin',
+        accion: 'CREAR_CLEANER',
+        detalles: `Nuevo cleaner registrado: ${cleanerName}`,
+      });
+    } catch (err) {
+      console.error('Error adding cleaner to DB:', err);
+      addToast('Nuevo Cleaner', `Cleaner "${cleanerName}" registrado en el equipo.`);
+    }
+
+    return cleanerName;
+  };
+
   // Schedule Management
   const handleAddSchedule = async (entry) => {
     try {
@@ -473,6 +539,7 @@ export default function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenNewService={handleOpenNewService}
+        onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
         onOpenAuditLog={() => setIsAuditModalOpen(true)}
         onPreviewLanding={() => setPreviewLanding(true)}
         lang={portalLang}
@@ -501,6 +568,7 @@ export default function App() {
             onCancelService={handleCancelService}
             onDeleteService={handleDeleteService}
             onOpenNewService={handleOpenNewService}
+            onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
           />
         )}
 
@@ -595,6 +663,7 @@ export default function App() {
             onEditService={handleEditService}
             onCancelService={handleCancelService}
             onAddClient={handleAddClient}
+            onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
             currentUser={currentUser}
           />
         )}
@@ -607,6 +676,7 @@ export default function App() {
             setPeriodFilter={setPeriodFilter}
             onEditService={handleEditService}
             onCancelService={handleCancelService}
+            onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
             currentUser={currentUser}
           />
         )}
@@ -623,11 +693,20 @@ export default function App() {
         serviceToEdit={serviceToEdit}
         onSave={handleSaveService}
         onAddClient={handleAddClient}
+        onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
         availableUnits={availableUnits}
         availableCleaners={availableCleaners}
         rates={rates}
         currentUser={currentUser}
         services={services}
+      />
+
+      {/* Add Cleaner Modal */}
+      <AddCleanerModal
+        isOpen={isAddCleanerModalOpen}
+        onClose={() => setIsAddCleanerModalOpen(false)}
+        onAddCleaner={handleAddCleaner}
+        existingCleaners={availableCleaners}
       />
 
       {/* Audit Log Modal */}

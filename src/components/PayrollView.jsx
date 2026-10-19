@@ -5,7 +5,7 @@ import {
   Sparkles, ArrowLeft, CheckCircle2, Building2, Printer,
   Share2, Camera, Eye, Filter, ArrowRight, Edit2, Ban, Plus, RotateCcw,
   History, CreditCard, AlertCircle, FileText, X, CheckSquare, ShieldCheck,
-  ExternalLink
+  ExternalLink, UserPlus
 } from 'lucide-react';
 import { exportPayrollToCSV } from '../lib/export';
 import { formatHoursAndMinutes } from './ServicesList';
@@ -99,6 +99,7 @@ export default function PayrollView({
   cleaners = [],
   onEditService,
   onCancelService,
+  onOpenAddCleaner,
   currentUser,
 }) {
   // Top Level Payroll Tab: 'current' (Control de Nómina) | 'history' (Historial de Pagos)
@@ -666,6 +667,18 @@ export default function PayrollView({
             >
               <Download className="w-3.5 h-3.5 text-[#FFB566]" />
               <span>Exportar Historial CSV</span>
+            </button>
+          )}
+
+          {currentUser?.role === 'admin' && onOpenAddCleaner && (
+            <button
+              type="button"
+              onClick={onOpenAddCleaner}
+              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-amber-50 to-[#FFF8EC] hover:from-amber-100 hover:to-amber-50 text-[#0B1D4A] border border-[#FFB566] text-xs font-bold rounded-xl transition-all shadow-2xs hover:shadow-xs active:scale-98 cursor-pointer"
+              title="Registrar nuevo cleaner en el equipo para control de nómina"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-[#E89A45] stroke-[2.5]" />
+              <span>Nuevo Cleaner</span>
             </button>
           )}
         </div>

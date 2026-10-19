@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search, Download, Plus, Edit2, Trash2, User, Clock, DollarSign,
-  Sparkles, Ban, RotateCcw, CheckCircle2, Building2, Calendar, BookOpen, X, Filter, Copy
+  Sparkles, Ban, RotateCcw, CheckCircle2, Building2, Calendar, BookOpen, X, Filter, Copy,
+  MoreVertical, UserPlus
 } from 'lucide-react';
 import { hasFullAccess, canManagePagos } from '../lib/auth';
 import { exportServicesToCSV } from '../lib/export';
@@ -35,6 +36,7 @@ export default function ServicesList({
   onDeleteService,
   onCancelService,
   onOpenNewService,
+  onOpenAddCleaner,
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -43,6 +45,27 @@ export default function ServicesList({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showGlossaryModal, setShowGlossaryModal] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  // Close 3-dots action dropdown when clicking outside or pressing Escape
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      if (!e.target.closest('.action-menu-cell')) {
+        setOpenMenuId(null);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('click', handleGlobalClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('click', handleGlobalClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const showFinancials = hasFullAccess(currentUser);
   const canEdit = canManagePagos(currentUser);
@@ -324,6 +347,18 @@ export default function ServicesList({
               <span>Nuevo Servicio</span>
             </button>
           )}
+
+          {currentUser?.role === 'admin' && onOpenAddCleaner && (
+            <button
+              type="button"
+              onClick={onOpenAddCleaner}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-50 to-[#FFF8EC] hover:from-amber-100 hover:to-amber-50 text-[#0B1D4A] border border-[#FFB566] text-xs font-bold rounded-xl transition-all shadow-2xs hover:shadow-xs active:scale-98 cursor-pointer"
+              title="Registrar nuevo cleaner en el equipo de trabajo"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-[#E89A45] stroke-[2.5]" />
+              <span>Nuevo Cleaner</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -486,19 +521,19 @@ export default function ServicesList({
                 <th className="px-4 py-3">Unidad / Residencia</th>
                 <th className="px-4 py-3">Cleaners</th>
                 <th className="px-4 py-3 text-center">Duración</th>
-                <th className="px-4 py-3">Tipo</th>
-                <th className="px-4 py-3 text-center">Estado</th>
                 {showFinancials && <th className="px-4 py-3 text-right">Cobro Cliente</th>}
                 <th className="px-4 py-3 text-right">Pago Cleaner</th>
                 {!isCleaner && <th className="px-4 py-3 text-right text-sky-900 bg-sky-50/60 font-bold">Pago Team</th>}
                 {showFinancials && <th className="px-4 py-3 text-right text-emerald-900 bg-emerald-50/60 font-bold">Utilidad Neta</th>}
                 <th className="px-4 py-3 text-right">Tip</th>
                 <th className="px-4 py-3">Capturista</th>
-                {canEdit && <th className="px-4 py-3 text-center min-w-[210px]">Acciones de Administrador</th>}
+                <th className="px-4 py-3">Tipo</th>
+                <th className="px-4 py-3 text-center">Estado</th>
+                {canEdit && <th className="px-4 py-3 text-center w-14">Acciones</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredServices.map((svc) => {
+              {filteredServices.map((svc, index) => {
                 const cleaners = svc.cleaners?.length ? svc.cleaners : (svc.cleaner ? [svc.cleaner] : []);
                 const cleanerPay = svc.pagosPorCleaner && Object.keys(svc.pagosPorCleaner).length > 0
                   ? Object.values(svc.pagosPorCleaner).reduce((a, b) => a + (Number(b) || 0), 0)
@@ -589,24 +624,6 @@ export default function ServicesList({
                       )}
                     </td>
 
-                    {/* Tipo */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-[11px] text-slate-600 font-semibold px-2 py-0.5 rounded-md bg-slate-100">
-                        {svc.tipo}
-                      </span>
-                    </td>
-
-                    {/* Estado */}
-                    <td className="px-4 py-3 text-center whitespace-nowrap">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                        isCancelled
-                          ? 'bg-rose-100 text-rose-800 border-rose-200'
-                          : 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                      }`}>
-                        {isCancelled ? 'Cancelado' : 'Activo'}
-                      </span>
-                    </td>
-
                     {/* Cobro Cliente */}
                     {showFinancials && (
                       <td className={`px-4 py-3 text-right tabular-nums font-bold ${isCancelled ? 'text-slate-400 line-through' : 'text-emerald-800'}`}>
@@ -666,83 +683,143 @@ export default function ServicesList({
                       {svc.capturista || 'WhiteGlove'}
                     </td>
 
-                    {/* ACTIONS FOR ADMINISTRATOR (EDITAR, CANCELAR, ELIMINAR) */}
+                    {/* Tipo (Al final de la información relevante) */}
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="text-[11px] text-slate-600 font-semibold px-2 py-0.5 rounded-md bg-slate-100">
+                        {svc.tipo}
+                      </span>
+                    </td>
+
+                    {/* Estado (Al final de la información relevante) */}
+                    <td className="px-4 py-3 text-center whitespace-nowrap">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                        isCancelled
+                          ? 'bg-rose-100 text-rose-800 border-rose-200'
+                          : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                      }`}>
+                        {isCancelled ? 'Cancelado' : 'Activo'}
+                      </span>
+                    </td>
+
+                    {/* Acciones de Administrador (Menú de tres puntos ⋮) */}
                     {canEdit && (
-                      <td className="px-4 py-3 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1.5">
-                          
-                          {/* 1. EDITAR BUTTON */}
-                          <button
-                            onClick={() => onEditService(svc)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-[#0B1D4A] bg-slate-100 hover:bg-[#FFB566] hover:text-[#0B1D4A] rounded-lg transition-colors shadow-2xs"
-                            title="Editar toda la información del servicio"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span>Editar</span>
-                          </button>
+                      <td className="px-4 py-3 text-center whitespace-nowrap relative action-menu-cell">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId((prev) => (prev === svc.id ? null : svc.id));
+                          }}
+                          className={`p-1.5 rounded-xl transition-all cursor-pointer ${
+                            openMenuId === svc.id
+                              ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs'
+                              : 'text-slate-500 hover:text-[#0B1D4A] hover:bg-slate-100'
+                          }`}
+                          title="Acciones de administrador"
+                          aria-label="Acciones de administrador"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
 
-                          {/* 2. CANCELAR / REACTIVAR BUTTON */}
-                          <button
-                            onClick={() => {
-                              if (onCancelService) {
-                                onCancelService(svc.id, isCancelled ? 'activo' : 'cancelado');
-                              }
-                            }}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-colors shadow-2xs ${
-                              isCancelled
-                                ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
-                                : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                        {/* Dropdown Menu */}
+                        {openMenuId === svc.id && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className={`absolute right-3 w-48 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 text-left animate-in fade-in zoom-in-95 duration-100 ${
+                              index >= filteredServices.length - 2 && filteredServices.length > 2
+                                ? 'bottom-full mb-1'
+                                : 'top-full mt-1'
                             }`}
-                            title={isCancelled ? 'Reactivar servicio' : 'Marcar servicio como cancelado'}
                           >
-                            {isCancelled ? (
-                              <>
-                                <RotateCcw className="w-3 h-3" />
-                                <span>Reactivar</span>
-                              </>
-                            ) : (
-                              <>
-                                <Ban className="w-3 h-3" />
-                                <span>Cancelar</span>
-                              </>
-                            )}
-                          </button>
+                            <div className="px-3 py-1 border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              Acciones Admin
+                            </div>
 
-                          {/* 3. DUPLICAR BUTTON (Para clientes recurrentes) */}
-                          {onOpenNewService && (
+                            {/* 1. Editar */}
                             <button
-                              onClick={() => onOpenNewService({
-                                unidad: svc.unidad,
-                                horas: svc.horas,
-                                cleaner: svc.cleaner,
-                                cleaners: svc.cleaners,
-                                tipo: svc.tipo,
-                                cobro: svc.cobro,
-                                pagoCleaningTeam: svc.pagoCleaningTeam,
-                                pagosPorCleaner: svc.pagosPorCleaner,
-                                ratesPorCleaner: svc.ratesPorCleaner,
-                                fecha: new Date().toISOString().split('T')[0],
-                                capturista: currentUser?.displayName || currentUser?.username || 'WhiteGlove',
-                                isDuplicate: true,
-                              })}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-sky-800 bg-sky-50 hover:bg-sky-100 hover:text-sky-950 rounded-lg transition-colors border border-sky-200 shadow-2xs cursor-pointer"
-                              title="Duplicar servicio con cargo y datos pre-llenados en automático para este cliente recurrente"
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                onEditService(svc);
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:text-[#0B1D4A] hover:bg-amber-50 transition-colors cursor-pointer text-left"
                             >
-                              <Copy className="w-3 h-3 text-sky-600" />
-                              <span>Duplicar</span>
+                              <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Editar servicio</span>
                             </button>
-                          )}
 
-                          {/* 4. ELIMINAR BUTTON */}
-                          <button
-                            onClick={() => onDeleteService(svc.id)}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors border border-rose-200 shadow-2xs"
-                            title="Eliminar permanentemente este servicio"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span>Eliminar</span>
-                          </button>
-                        </div>
+                            {/* 2. Duplicar */}
+                            {onOpenNewService && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  onOpenNewService({
+                                    unidad: svc.unidad,
+                                    horas: svc.horas,
+                                    cleaner: svc.cleaner,
+                                    cleaners: svc.cleaners,
+                                    tipo: svc.tipo,
+                                    cobro: svc.cobro,
+                                    pagoCleaningTeam: svc.pagoCleaningTeam,
+                                    pagosPorCleaner: svc.pagosPorCleaner,
+                                    ratesPorCleaner: svc.ratesPorCleaner,
+                                    fecha: new Date().toISOString().split('T')[0],
+                                    capturista: currentUser?.displayName || currentUser?.username || 'WhiteGlove',
+                                    isDuplicate: true,
+                                  });
+                                }}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-sky-800 hover:text-sky-950 hover:bg-sky-50 transition-colors cursor-pointer text-left"
+                              >
+                                <Copy className="w-3.5 h-3.5 text-sky-600" />
+                                <span>Duplicar servicio</span>
+                              </button>
+                            )}
+
+                            {/* 3. Cancelar / Reactivar */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                if (onCancelService) {
+                                  onCancelService(svc.id, isCancelled ? 'activo' : 'cancelado');
+                                }
+                              }}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold transition-colors cursor-pointer text-left ${
+                                isCancelled
+                                  ? 'text-emerald-700 hover:bg-emerald-50'
+                                  : 'text-amber-800 hover:bg-amber-50'
+                              }`}
+                            >
+                              {isCancelled ? (
+                                <>
+                                  <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Reactivar servicio</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Ban className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>Cancelar servicio</span>
+                                </>
+                              )}
+                            </button>
+
+                            <div className="my-1 border-t border-slate-100" />
+
+                            {/* 4. Eliminar */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                onDeleteService(svc.id);
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer text-left"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                              <span>Eliminar servicio</span>
+                            </button>
+                          </div>
+                        )}
                       </td>
                     )}
                   </tr>
