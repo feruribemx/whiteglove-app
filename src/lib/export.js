@@ -7,22 +7,33 @@ export function exportServicesToCSV(services, filename = 'servicios_whiteglove.c
 
   const headers = [
     'ID', 'Fecha', 'Cliente / Unidad', 'Cleaners', 'Horas',
-    'Tipo', 'Cobro Cliente', 'Pago Cleaner', 'Pago Team', 'Tip', 'Capturista'
+    'Tipo', 'Cobro Cliente', 'Pago Cleaner', 'Pago Team', 'Utilidad', 'Tip', 'Capturista'
   ];
 
-  const rows = services.map(s => [
-    s.id,
-    s.fecha,
-    `"${(s.unidad || '').replace(/"/g, '""')}"`,
-    `"${(s.cleaners || []).join(', ').replace(/"/g, '""')}"`,
-    s.horas,
-    `"${(s.tipo || '').replace(/"/g, '""')}"`,
-    s.cobro != null ? s.cobro : '',
-    s.pagoCleaner != null ? s.pagoCleaner : '',
-    s.pagoCleaningTeam != null ? s.pagoCleaningTeam : '',
-    s.tip != null ? s.tip : '',
-    `"${(s.capturista || '').replace(/"/g, '""')}"`,
-  ]);
+  const rows = services.map(s => {
+    const cobro = Number(s.cobro) || 0;
+    const teamPay = Number(s.pagoCleaningTeam) || 0;
+    const cleanerPay = s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).length > 0
+      ? Object.values(s.pagosPorCleaner).reduce((a, b) => a + (Number(b) || 0), 0)
+      : (Number(s.pagoCleaner) || 0);
+    const cost = teamPay > 0 ? teamPay : cleanerPay;
+    const utilidad = s.status === 'cancelado' ? 0 : (s.cobro != null ? (cobro - cost).toFixed(2) : '');
+
+    return [
+      s.id,
+      s.fecha,
+      `"${(s.unidad || '').replace(/"/g, '""')}"`,
+      `"${(s.cleaners || []).join(', ').replace(/"/g, '""')}"`,
+      s.horas,
+      `"${(s.tipo || '').replace(/"/g, '""')}"`,
+      s.cobro != null ? s.cobro : '',
+      s.pagoCleaner != null ? s.pagoCleaner : '',
+      s.pagoCleaningTeam != null ? s.pagoCleaningTeam : '',
+      utilidad,
+      s.tip != null ? s.tip : '',
+      `"${(s.capturista || '').replace(/"/g, '""')}"`,
+    ];
+  });
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   downloadBlob(csvContent, filename, 'text/csv;charset=utf-8;');

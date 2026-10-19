@@ -21,7 +21,12 @@ export default function Navbar({
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
-  const isCleaner = currentUser?.role === 'cleaner';
+  const isCleaner = Boolean(
+    currentUser && (
+      (currentUser.role || '').toLowerCase() === 'cleaner' ||
+      (currentUser.role !== 'admin' && !['fernandouribe', 'michelleadmin', 'fercastil'].includes((currentUser.username || '').toLowerCase()))
+    )
+  );
   const isAdmin = currentUser?.role === 'admin';
   const showFinances = hasFullAccess(currentUser);
 
@@ -49,7 +54,7 @@ export default function Navbar({
   const navItems = isCleaner
     ? [
         { id: 'registro', label: lang === 'en' ? 'My Shifts' : 'Mi Registro', icon: ClipboardList },
-        { id: 'schedule', label: lang === 'en' ? 'Assignments' : 'Mis Asignaciones', icon: Calendar },
+        { id: 'schedule', label: lang === 'en' ? 'Calendar' : 'Calendario', icon: Calendar },
       ]
     : [
         { id: 'services', label: lang === 'en' ? 'Services' : 'Servicios', icon: ClipboardList },

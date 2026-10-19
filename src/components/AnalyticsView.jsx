@@ -25,9 +25,11 @@ export default function AnalyticsView({ services }) {
       ? Object.values(s.pagosPorCleaner).reduce((a, b) => a + (Number(b) || 0), 0)
       : Number(s.pagoCleaner) || 0;
     const teamPay = Number(s.pagoCleaningTeam) || 0;
+    const cost = teamPay > 0 ? teamPay : cleanerPay;
 
     monthlyData[monthKey].cobro += cobroVal;
-    monthlyData[monthKey].costos += (cleanerPay + teamPay);
+    monthlyData[monthKey].costos += cost;
+    monthlyData[monthKey].utilidad = (monthlyData[monthKey].utilidad || 0) + (cobroVal - cost);
     monthlyData[monthKey].horas += Number(s.horas) || 0;
     monthlyData[monthKey].servicios += 1;
   });

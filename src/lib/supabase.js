@@ -10,7 +10,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 export const BASE_UNITS = [
-  'Mohammed', 'Phillys',
+  'Mohammed', 'Phillys', 'CHAND',
   'Rohan Unit A', 'Rohan Unit B', 'Rohan Unit C', 'Alexei', 'Larisse N',
   'Anine Bing YV', 'Anine Bing YD', 'Mandy D', 'Saadman', 'Mayeesha',
   'Max - Hamilton', 'Veradek', 'Abi', 'KENNY SPADINA', 'Georgia Ancaster'

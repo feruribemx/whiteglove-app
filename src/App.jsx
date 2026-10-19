@@ -42,11 +42,26 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const stored = localStorage.getItem('wg-current-user');
-      return stored ? JSON.parse(stored) : null;
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u) {
+        const adminNames = ['fernandouribe', 'michelleadmin', 'fercastil'];
+        if (!u.role) {
+          u.role = adminNames.includes((u.username || '').toLowerCase()) ? 'admin' : 'cleaner';
+        }
+      }
+      return u;
     } catch {
       return null;
     }
   });
+
+  const isUserCleaner = Boolean(
+    currentUser && (
+      (currentUser.role || '').toLowerCase() === 'cleaner' ||
+      (currentUser.role !== 'admin' && !['fernandouribe', 'michelleadmin', 'fercastil'].includes((currentUser.username || '').toLowerCase()))
+    )
+  );
 
   // Data states
   const [services, setServices] = useState([]);
@@ -59,7 +74,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   // UI Navigation & Modals
-  const [activeTab, setActiveTab] = useState(() => (currentUser?.role === 'cleaner' ? 'registro' : 'services'));
+  const [activeTab, setActiveTab] = useState(() => (isUserCleaner ? 'registro' : 'services'));
   const [periodFilter, setPeriodFilter] = useState('all');
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState(null);
@@ -492,6 +507,30 @@ export default function App() {
         {activeTab === 'registro' && (
           /* Personal cleaner view of their logged hours */
           <div className="space-y-4">
+            {/* Upcoming Services Notice for Cleaners */}
+            <div className="bg-gradient-to-r from-[#0B1D4A] to-[#1E3670] text-white p-4 rounded-2xl border border-slate-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#FFB566]/20 border border-[#FFB566]/40 flex items-center justify-center shrink-0">
+                  <span className="text-lg">📅</span>
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-sm text-[#FAF7F1]">
+                    Tu Calendario de Servicios Programados
+                  </h3>
+                  <p className="text-xs text-slate-300">
+                    Consulta las fechas y turnos futuros donde estás asignado en el sistema
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTab('schedule')}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#FFB566] hover:bg-[#E89A45] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-xs transition-all active:scale-98 shrink-0 cursor-pointer"
+              >
+                <span>Ver Mi Calendario</span>
+                <span>→</span>
+              </button>
+            </div>
+
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-serif font-semibold text-[#0B1D4A]">
@@ -501,15 +540,23 @@ export default function App() {
                   Historial de horas trabajadas registradas en el sistema para tu nómina
                 </p>
               </div>
-              <button
-                onClick={() => handleOpenNewService({
-                  cleaner: currentUser.displayName || currentUser.username,
-                  cleaners: [currentUser.displayName || currentUser.username]
-                })}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl hover:brightness-105 active:scale-98 transition-all shadow-xs shrink-0"
-              >
-                + Registrar Mi Servicio
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setActiveTab('schedule')}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  📅 Calendario
+                </button>
+                <button
+                  onClick={() => handleOpenNewService({
+                    cleaner: currentUser.displayName || currentUser.username,
+                    cleaners: [currentUser.displayName || currentUser.username]
+                  })}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl hover:brightness-105 active:scale-98 transition-all shadow-xs shrink-0 cursor-pointer"
+                >
+                  + Registrar Mi Servicio
+                </button>
+              </div>
             </div>
             <ServicesList
               services={services}
@@ -538,12 +585,15 @@ export default function App() {
         {activeTab === 'schedule' && (
           <ScheduleView
             schedule={schedule}
+            services={services}
             availableUnits={availableUnits}
             availableCleaners={availableCleaners}
             onAddSchedule={handleAddSchedule}
             onUpdateSchedule={handleUpdateSchedule}
             onDeleteSchedule={handleDeleteSchedule}
             onOpenNewService={handleOpenNewService}
+            onEditService={handleEditService}
+            onCancelService={handleCancelService}
             onAddClient={handleAddClient}
             currentUser={currentUser}
           />
@@ -576,6 +626,7 @@ export default function App() {
         availableCleaners={availableCleaners}
         rates={rates}
         currentUser={currentUser}
+        services={services}
       />
 
       {/* Audit Log Modal */}

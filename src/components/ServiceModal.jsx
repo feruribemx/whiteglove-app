@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, DollarSign, Clock, User, Building2, AlertCircle, Ban, CheckCircle2, RotateCcw } from 'lucide-react';
+import {
+  X, Plus, Trash2, DollarSign, Clock, User, Building2, AlertCircle, Ban,
+  CheckCircle2, RotateCcw, Sparkles, Copy, RefreshCw, BookmarkCheck
+} from 'lucide-react';
 import { hasFullAccess, canManagePagos } from '../lib/auth';
 import { TYPES } from '../lib/supabase';
+import { resolveClientMemory, saveClientMemory } from '../lib/clientMemory';
 
 export default function ServiceModal({
   isOpen,
@@ -13,6 +17,7 @@ export default function ServiceModal({
   availableCleaners,
   rates,
   currentUser,
+  services = [],
 }) {
   if (!isOpen) return null;
 
@@ -20,6 +25,7 @@ export default function ServiceModal({
   const canEditPay = canManagePagos(currentUser);
   const isCleaner = currentUser?.role === 'cleaner';
   const loggedCleanerName = currentUser?.displayName || currentUser?.username || 'Cleaner';
+  const isDuplicateMode = Boolean(serviceToEdit?.isDuplicate);
 
   // Form State
   const [fecha, setFecha] = useState('');
@@ -40,6 +46,10 @@ export default function ServiceModal({
   const [pagosPorCleaner, setPagosPorCleaner] = useState({});
   const [capturista, setCapturista] = useState('');
   const [validationError, setValidationError] = useState('');
+
+  // Memory & Recurring Client State
+  const [memoryInfo, setMemoryInfo] = useState(null);
+  const [autofillBanner, setAutofillBanner] = useState(null);
 
   // New Client Modal State
   const [showNewClientModal, setShowNewClientModal] = useState(false);
@@ -68,7 +78,8 @@ export default function ServiceModal({
   useEffect(() => {
     if (serviceToEdit) {
       setFecha(serviceToEdit.fecha || '');
-      setUnidad(serviceToEdit.unidad || availableUnits[0] || '');
+      const selectedUnit = serviceToEdit.unidad || availableUnits[0] || '';
+      setUnidad(selectedUnit);
       const cls = isCleaner
         ? [loggedCleanerName]
         : (serviceToEdit.cleaners?.length
@@ -95,25 +106,54 @@ export default function ServiceModal({
       setRatesPorCleaner(serviceToEdit.ratesPorCleaner || {});
       setPagosPorCleaner(serviceToEdit.pagosPorCleaner || {});
       setCapturista(serviceToEdit.capturista || loggedCleanerName);
+
+      const mem = resolveClientMemory(selectedUnit, services);
+      setMemoryInfo(mem);
+
+      if (serviceToEdit.isDuplicate) {
+        setAutofillBanner(
+          `Servicio duplicado para "${selectedUnit}". Cargo al cliente de $${serviceToEdit.cobro || 0} CAD y datos cargados en automático.`
+        );
+      } else {
+        setAutofillBanner(null);
+      }
     } else {
       // New service defaults
       const today = new Date().toISOString().split('T')[0];
       setFecha(today);
-      setUnidad(availableUnits[0] || '');
+      const initialUnit = availableUnits[0] || '';
+      setUnidad(initialUnit);
       const targetCleaners = isCleaner
         ? [loggedCleanerName]
         : (availableCleaners[0] ? [availableCleaners[0]] : []);
       setSelectedCleaners(targetCleaners);
-      setHorasEnteras(2);
-      setMinutos(0);
-      setTipo('Limpieza');
       setStatus('activo');
-      setCobro('');
-      setPagoCleaner('');
-      setPagoCleaningTeam('');
       setTip('');
       setCapturista(loggedCleanerName || 'WhiteGlove');
-      
+
+      // Automatic memory recall for default client
+      const mem = resolveClientMemory(initialUnit, services);
+      setMemoryInfo(mem);
+
+      if (mem && mem.cobro != null && mem.cobro > 0) {
+        setCobro(String(mem.cobro));
+        setPagoCleaningTeam(mem.pagoCleaningTeam ? String(mem.pagoCleaningTeam) : '');
+        setTipo(mem.tipo || 'Limpieza');
+        const whole = Math.floor(mem.horas || 2);
+        const mins = Math.round(((mem.horas || 2) - whole) * 60);
+        setHorasEnteras(whole);
+        setMinutos(mins);
+        setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${initialUnit}" cargada automáticamente desde memoria.`);
+      } else {
+        setCobro('');
+        setPagoCleaningTeam('');
+        setTipo('Limpieza');
+        setHorasEnteras(2);
+        setMinutos(0);
+        setAutofillBanner(null);
+      }
+
+      setPagoCleaner('');
       const defaultRate = rates?.['Limpieza']?.amount || 18;
       const initialRates = {};
       const initialPagos = {};
@@ -125,7 +165,7 @@ export default function ServiceModal({
       setPagosPorCleaner(initialPagos);
     }
     setValidationError('');
-  }, [serviceToEdit, isOpen, isCleaner, loggedCleanerName]);
+  }, [serviceToEdit, isOpen, isCleaner, loggedCleanerName, availableUnits, services]);
 
   // Recalculate suggested pay when cleaners or duration changes
   const updatePayForCleaners = (cleanersList, h, m) => {
@@ -172,6 +212,39 @@ export default function ServiceModal({
     setPagoCleaner(String(totalP));
   };
 
+  const handleUnitSelect = (newUnit) => {
+    setUnidad(newUnit);
+    // When creating a new service or duplicating, auto-populate from client memory
+    if (!serviceToEdit || serviceToEdit.isDuplicate) {
+      const mem = resolveClientMemory(newUnit, services);
+      setMemoryInfo(mem);
+      if (mem && mem.cobro != null && mem.cobro > 0) {
+        setCobro(String(mem.cobro));
+        if (mem.pagoCleaningTeam > 0) {
+          setPagoCleaningTeam(String(mem.pagoCleaningTeam));
+        } else {
+          setPagoCleaningTeam('');
+        }
+        if (mem.tipo) setTipo(mem.tipo);
+        if (mem.horas) {
+          const whole = Math.floor(mem.horas);
+          const mins = Math.round((mem.horas - whole) * 60);
+          setHorasEnteras(whole);
+          setMinutos(mins);
+          updatePayForCleaners(selectedCleaners, whole, mins);
+        }
+        setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${newUnit}" cargada automáticamente desde memoria.`);
+      } else {
+        setCobro('');
+        setPagoCleaningTeam('');
+        setAutofillBanner(null);
+      }
+    } else {
+      const mem = resolveClientMemory(newUnit, services);
+      setMemoryInfo(mem);
+    }
+  };
+
   const handleCreateNewClient = async (e) => {
     e?.preventDefault?.();
     const trimmed = newClientName.trim();
@@ -189,6 +262,19 @@ export default function ServiceModal({
       if (newClientType) setTipo(newClientType);
       if (newClientRate && showFinancials && (!cobro || cobro === '')) {
         setCobro(newClientRate);
+      }
+      // Save newly registered client in persistent memory
+      saveClientMemory(trimmed, {
+        cobro: newClientRate ? Number(newClientRate) : null,
+        tipo: newClientType || 'Limpieza',
+        horas: 2,
+        address: newClientAddress,
+        notes: newClientNotes,
+      });
+      const mem = resolveClientMemory(trimmed, services);
+      setMemoryInfo(mem);
+      if (newClientRate) {
+        setAutofillBanner(`Nueva tarifa de $${newClientRate} CAD guardada en memoria para "${trimmed}".`);
       }
       setNewClientName('');
       setNewClientAddress('');
@@ -208,7 +294,7 @@ export default function ServiceModal({
       if (onAddClient) {
         await onAddClient(clientPresetName);
       }
-      setUnidad(clientPresetName);
+      handleUnitSelect(clientPresetName);
       setShowNewClientModal(false);
     } catch (err) {
       console.error('Error quick adding client:', err);
@@ -236,9 +322,14 @@ export default function ServiceModal({
       return;
     }
 
+    const isDup = Boolean(serviceToEdit?.isDuplicate);
+    const targetId = (!isDup && serviceToEdit?.id)
+      ? serviceToEdit.id
+      : (Date.now() + Math.floor(Math.random() * 1000));
+
     const payload = {
       ...(serviceToEdit || {}),
-      id: serviceToEdit?.id || Date.now() + Math.floor(Math.random() * 1000),
+      id: targetId,
       fecha,
       unidad,
       cleaners: selectedCleaners,
@@ -254,6 +345,18 @@ export default function ServiceModal({
       tip: tip !== '' ? Number(tip) : null,
       capturista: capturista || serviceToEdit?.capturista || currentUser?.displayName || currentUser?.username || 'WhiteGlove',
     };
+    delete payload.isDuplicate;
+
+    // Persist client memory so future and recurring duplicates fill in automatic
+    if (unidad && cobro !== '') {
+      saveClientMemory(unidad, {
+        cobro: Number(cobro) || 0,
+        tipo,
+        horas: totalDecimalHours,
+        pagoCleaningTeam: pagoCleaningTeam !== '' ? Number(pagoCleaningTeam) : 0,
+        cleaners: selectedCleaners,
+      });
+    }
 
     onSave(payload);
   };
@@ -270,11 +373,19 @@ export default function ServiceModal({
             <span className="font-serif text-lg font-bold text-[#FAF7F1]">
               {isCleaner
                 ? (serviceToEdit?.id ? 'Editar Mi Servicio' : 'Registrar Mi Servicio')
-                : (serviceToEdit ? 'Editar Servicio' : 'Capturar Nuevo Servicio')}
+                : (isDuplicateMode
+                  ? 'Duplicar Servicio (Cliente Recurrente)'
+                  : (serviceToEdit ? 'Editar Servicio' : 'Capturar Nuevo Servicio'))}
             </span>
             {status === 'cancelado' && (
               <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-400/40 text-[10px] font-bold">
                 Cancelado
+              </span>
+            )}
+            {isDuplicateMode && (
+              <span className="px-2 py-0.5 rounded-full bg-sky-400/25 text-sky-200 border border-sky-300/40 text-[10px] font-bold flex items-center gap-1">
+                <Copy className="w-3 h-3 text-sky-300" />
+                Duplicado
               </span>
             )}
           </div>
@@ -288,6 +399,45 @@ export default function ServiceModal({
 
         {/* Scrollable Form Body */}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
+          {/* Duplicate Mode Banner */}
+          {isDuplicateMode && (
+            <div className="p-3.5 rounded-2xl bg-sky-50 border border-sky-200 text-sky-900 text-xs flex items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-sky-600 text-white rounded-xl shadow-2xs">
+                  <Copy className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-bold block text-sky-950">
+                    Memoria Aplicada: Cliente Recurrente "{unidad}"
+                  </span>
+                  <span className="text-[11px] text-sky-800">
+                    Cargo al cliente de ${cobro || 0} CAD, horas y datos cargados en automático para esta nueva fecha.
+                  </span>
+                </div>
+              </div>
+              <span className="px-2 py-1 rounded-lg bg-white border border-sky-200 text-sky-900 text-[10px] font-bold">
+                Nuevo Folio
+              </span>
+            </div>
+          )}
+
+          {/* Autofill Notification Banner */}
+          {autofillBanner && !isDuplicateMode && (
+            <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between gap-2 shadow-2xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-medium">{autofillBanner}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAutofillBanner(null)}
+                className="text-emerald-700 hover:text-emerald-900 text-xs font-bold px-1.5 py-0.5 rounded-md hover:bg-emerald-100"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
           {validationError && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -380,7 +530,7 @@ export default function ServiceModal({
             </div>
             <select
               value={unidad}
-              onChange={(e) => setUnidad(e.target.value)}
+              onChange={(e) => handleUnitSelect(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] bg-white font-semibold"
               required
             >
@@ -388,6 +538,41 @@ export default function ServiceModal({
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
+
+            {/* Client Memory & Recurrence Info Badge */}
+            {memoryInfo && memoryInfo.cobro > 0 ? (
+              <div className="mt-2 flex items-center justify-between text-[11px] bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                <div className="flex items-center gap-1.5 text-slate-700 flex-wrap">
+                  <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="font-bold text-slate-900">Cliente Recurrente:</span>
+                  <span>Tarifa en memoria <strong className="text-emerald-700 font-bold">${memoryInfo.cobro} CAD</strong></span>
+                  {memoryInfo.totalServices > 0 && (
+                    <span className="text-slate-500">
+                      ({memoryInfo.totalServices} {memoryInfo.totalServices === 1 ? 'servicio' : 'servicios'})
+                    </span>
+                  )}
+                </div>
+                {String(cobro) !== String(memoryInfo.cobro) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCobro(String(memoryInfo.cobro));
+                      setAutofillBanner(`Tarifa restablecida a $${memoryInfo.cobro} CAD.`);
+                    }}
+                    className="inline-flex items-center gap-1 text-[10px] font-bold text-[#0B1D4A] hover:underline cursor-pointer ml-2 shrink-0"
+                    title="Restablecer tarifa habitual recordada"
+                  >
+                    <RefreshCw className="w-3 h-3 text-[#0B1D4A]" />
+                    <span>Restablecer</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500 px-1">
+                <Sparkles className="w-3 h-3 text-[#FFB566] shrink-0" />
+                <span>El cargo que registres se guardará en automático en la memoria de este cliente.</span>
+              </div>
+            )}
           </div>
 
           {/* Cleaners Selection (Locked exclusively to logged in cleaner if isCleaner) */}
@@ -549,7 +734,20 @@ export default function ServiceModal({
           <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
             {showFinancials && (
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Cobro al Cliente (CAD)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Cobro al Cliente (CAD)</label>
+                  {memoryInfo?.cobro > 0 && String(cobro) === String(memoryInfo.cobro) && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-300">
+                      <Sparkles className="w-2.5 h-2.5 text-emerald-700" />
+                      En automático
+                    </span>
+                  )}
+                  {memoryInfo?.cobro > 0 && String(cobro) !== String(memoryInfo.cobro) && cobro !== '' && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-800 bg-sky-100/90 px-2 py-0.5 rounded-full border border-sky-300">
+                      💾 Actualizará memoria
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-slate-400 text-xs font-semibold">$</span>
                   <input

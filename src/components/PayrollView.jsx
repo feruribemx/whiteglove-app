@@ -323,6 +323,14 @@ export default function PayrollView({
     return payrollList.filter((cs) => cs.totalServices > 0).length;
   }, [payrollList]);
 
+  // Overall team payout in this period
+  const totalTeamPayroll = useMemo(() => {
+    return servicesInPeriod.reduce((sum, s) => {
+      if (s.status === 'cancelado') return sum;
+      return sum + (Number(s.pagoCleaningTeam) || 0);
+    }, 0);
+  }, [servicesInPeriod]);
+
   // Active individual cleaner data if selected
   const activeCleanerData = selectedCleaner !== 'all' ? cleanerStatsMap[selectedCleaner] : null;
 
@@ -1187,13 +1195,17 @@ export default function PayrollView({
               </span>
             </div>
             
-            <div className="flex items-center gap-6 text-xs text-slate-300 border-l border-slate-700/80 pl-6">
+            <div className="flex items-center gap-6 text-xs text-slate-300 border-l border-slate-700/80 pl-6 flex-wrap">
               <div>
-                <span className="text-slate-400 block font-medium">Horas Acumuladas</span>
+                <span className="text-slate-400 block font-medium">Horas Cleaners</span>
                 <span className="text-base font-bold text-white tabular-nums">{totalPayrollHours.toFixed(1)} hrs</span>
               </div>
               <div>
-                <span className="text-slate-400 block font-medium">Promedio por Hora</span>
+                <span className="text-slate-400 block font-medium">Pago a Teams (Período)</span>
+                <span className="text-base font-bold text-sky-300 tabular-nums">${totalTeamPayroll.toFixed(2)} CAD</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block font-medium">Promedio/Hora Cleaner</span>
                 <span className="text-base font-bold text-white tabular-nums">
                   ${totalPayrollHours > 0 ? (totalPayroll / totalPayrollHours).toFixed(2) : '0.00'}/h
                 </span>
