@@ -171,11 +171,21 @@ export default function ServicesList({
         }
       }
 
-      // 5. Capturista / Folio ID
+      // 5. Capturista / Folio ID / Notas / Dirección
       const captMatch = normalizeText(s.capturista || '').includes(term);
       const idMatch = String(s.id || '').includes(term);
+      const notesMatch = normalizeText(s.notas || '').includes(term);
+      const dirMatch = normalizeText(s.direccion || '').includes(term);
 
-      if (!unitMatch && !clMatch && !tipoMatch && !fechaMatch && !captMatch && !idMatch) {
+      // 6. Cross-field multi-token match (e.g. "CHAND limpieza", "Carlos 15 Oct", "CHAND 2026")
+      const combinedSearchStr = normalizeText(`
+        ${s.unidad || ''} ${s.cliente || ''} ${s.client || ''} ${s.direccion || ''}
+        ${s.cleaner || ''} ${(s.cleaners || []).join(' ')} ${pagosCleaners.join(' ')}
+        ${s.tipo || ''} ${s.fecha || ''} ${s.notas || ''} ${s.capturista || ''} ${s.id || ''}
+      `);
+      const crossMatch = tokens.length > 1 && tokens.every((tok) => combinedSearchStr.includes(tok));
+
+      if (!unitMatch && !clMatch && !tipoMatch && !fechaMatch && !captMatch && !idMatch && !notesMatch && !dirMatch && !crossMatch) {
         return false;
       }
     }

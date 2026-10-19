@@ -607,6 +607,7 @@ export default function App() {
             setPeriodFilter={setPeriodFilter}
             onEditService={handleEditService}
             onCancelService={handleCancelService}
+            currentUser={currentUser}
           />
         )}
 
