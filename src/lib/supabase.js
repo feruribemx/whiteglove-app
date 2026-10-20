@@ -205,6 +205,24 @@ export async function saveRates(rates) {
   }
 }
 
+export async function fetchPayrollSetting(key) {
+  try {
+    const { data, error } = await supabase.from('settings').select('*').eq('key', key).maybeSingle();
+    if (error) return null;
+    return data?.value || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function savePayrollSetting(key, value) {
+  try {
+    await supabase.from('settings').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  } catch (err) {
+    // Non-blocking background persistence
+  }
+}
+
 export async function fetchExtraClients() {
   try {
     const { data, error } = await supabase.from('clients').select('*').order('name');

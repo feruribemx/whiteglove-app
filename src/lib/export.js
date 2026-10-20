@@ -43,17 +43,39 @@ export function exportPayrollToCSV(payrollData, filename = 'nomina_cleaners_whit
   if (!payrollData || payrollData.length === 0) return;
 
   const headers = [
-    'Cleaner', 'Total Servicios', 'Total Horas', 'Pago Base', 'Tips', 'Total a Pagar'
+    'Cleaner',
+    'Turnos Totales',
+    'Turnos a Liquidar',
+    'Turnos Ya Pagados Previamente',
+    'Horas a Liquidar',
+    'Pago Base Pendiente',
+    'Tips Pendientes',
+    'Monto Excluido (Ya Pagado)',
+    'Total a Pagar (CAD)',
+    'Estado'
   ];
 
-  const rows = payrollData.map(p => [
-    `"${(p.cleaner || '').replace(/"/g, '""')}"`,
-    p.totalServices,
-    p.totalHours.toFixed(2),
-    p.basePay.toFixed(2),
-    p.tips.toFixed(2),
-    p.totalPay.toFixed(2),
-  ]);
+  const rows = payrollData.map(p => {
+    const isPaid = p.isPaid;
+    const pendingH = (isPaid ? p.totalHours : (p.pendingHours ?? p.totalHours)).toFixed(2);
+    const pendingB = (isPaid ? p.basePay : (p.pendingBasePay ?? p.basePay)).toFixed(2);
+    const pendingT = (isPaid ? p.tips : (p.pendingTips ?? p.tips)).toFixed(2);
+    const alreadyPaidAmt = (p.alreadyPaidAmount || 0).toFixed(2);
+    const estado = isPaid ? 'PAGADO' : 'PENDIENTE';
+
+    return [
+      `"${(p.cleaner || '').replace(/"/g, '""')}"`,
+      p.totalServices,
+      p.pendingServicesCount ?? (isPaid ? 0 : p.totalServices),
+      p.alreadyPaidServicesCount || 0,
+      pendingH,
+      pendingB,
+      pendingT,
+      alreadyPaidAmt,
+      p.totalPay.toFixed(2),
+      estado
+    ];
+  });
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   downloadBlob(csvContent, filename, 'text/csv;charset=utf-8;');

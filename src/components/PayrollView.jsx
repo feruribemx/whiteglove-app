@@ -1,19 +1,22 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   DollarSign, Download, Users, Clock, Search, Gift,
   Calendar, Check, Copy, UserCheck, ChevronRight, ChevronLeft,
   Sparkles, ArrowLeft, CheckCircle2, Building2, Printer,
   Share2, Camera, Eye, Filter, ArrowRight, Edit2, Ban, Plus, RotateCcw,
   History, CreditCard, AlertCircle, FileText, X, CheckSquare, ShieldCheck,
-  ExternalLink, UserPlus
+  ExternalLink, UserPlus, Info
 } from 'lucide-react';
 import { exportPayrollToCSV } from '../lib/export';
 import { formatHoursAndMinutes } from './ServicesList';
 import {
   getPayrollPayments,
-  getCleanerPaymentStatus,
+  getPaidServices,
+  isServicePaidForCleaner,
   markCleanerPayrollAsPaid,
   markCleanerPayrollAsPending,
+  syncPaidServicesFromExistingPayments,
+  syncPayrollCloud,
   getAllPaymentHistory,
   exportPaymentHistoryToCSV,
   formatPaymentDate,
@@ -137,6 +140,28 @@ export default function PayrollView({
 
   // Payment Status Management (stored in localStorage)
   const [paymentsMap, setPaymentsMap] = useState(() => getPayrollPayments());
+  const [paidServicesMap, setPaidServicesMap] = useState(() => getPaidServices());
+
+  // Sync payroll payments with cloud settings on mount
+  useEffect(() => {
+    let mounted = true;
+    syncPayrollCloud().then(({ payments, paidServices }) => {
+      if (!mounted) return;
+      if (payments) setPaymentsMap(payments);
+      if (paidServices) setPaidServicesMap(paidServices);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  // Automatically reconcile historical payments to protect already-paid shifts from duplicate counts
+  useEffect(() => {
+    if (services && services.length > 0) {
+      const synced = syncPaidServicesFromExistingPayments(services);
+      if (synced) {
+        setPaidServicesMap({ ...synced });
+      }
+    }
+  }, [services]);
 
   // Payment Modal States
   const [payModalTarget, setPayModalTarget] = useState(null); // { cleaner, amount, hours, servicesCount, periodLabel, periodType, periodKey }
@@ -250,7 +275,7 @@ export default function PayrollView({
     return services.filter((s) => isDateInRange(s.fecha));
   }, [services, isDateInRange]);
 
-  // Aggregate stats per cleaner in this period (excluding cancelled services from total pay)
+  // Aggregate stats per cleaner in this period (excluding cancelled services and protecting already-paid services from duplicate counts)
   const { cleanerStatsMap, allCleanersList } = useMemo(() => {
     const stats = {};
 
@@ -263,8 +288,26 @@ export default function PayrollView({
         totalHours: 0,
         basePay: 0,
         tips: 0,
+        totalPeriodEarnings: 0,
+
+        // Unpaid / Pending accumulators (strictly what is to be paid in this payroll)
+        pendingServicesCount: 0,
+        pendingHours: 0,
+        pendingBasePay: 0,
+        pendingTips: 0,
+        pendingPay: 0,
+        pendingServicesList: [],
+
+        // Already Paid accumulators (e.g. day 16 previously paid in range 1-16)
+        alreadyPaidServicesCount: 0,
+        alreadyPaidHours: 0,
+        alreadyPaidBasePay: 0,
+        alreadyPaidTips: 0,
+        alreadyPaidAmount: 0,
+        alreadyPaidServicesList: [],
+
         manualAdjustment: Number(manualAdjustments[c]) || 0,
-        totalPay: 0,
+        totalPay: 0, // Pending amount to transfer
         servicesList: [],
       };
     });
@@ -287,6 +330,19 @@ export default function PayrollView({
             totalHours: 0,
             basePay: 0,
             tips: 0,
+            totalPeriodEarnings: 0,
+            pendingServicesCount: 0,
+            pendingHours: 0,
+            pendingBasePay: 0,
+            pendingTips: 0,
+            pendingPay: 0,
+            pendingServicesList: [],
+            alreadyPaidServicesCount: 0,
+            alreadyPaidHours: 0,
+            alreadyPaidBasePay: 0,
+            alreadyPaidTips: 0,
+            alreadyPaidAmount: 0,
+            alreadyPaidServicesList: [],
             manualAdjustment: Number(manualAdjustments[cl]) || 0,
             totalPay: 0,
             servicesList: [],
@@ -311,6 +367,10 @@ export default function PayrollView({
         const clHours = Number(svc.horas) || 0;
         const clServiceTotal = clBasePay + clTip;
 
+        // Check if this specific service was already marked as paid for this cleaner in any prior payroll
+        const paidRecord = isServicePaidForCleaner(svc, cl, paidServicesMap);
+        const isAlreadyPaid = Boolean(paidRecord);
+
         // If cancelled, keep in list for audit/corroboration, but don't add to totals
         if (isCancelled) {
           stats[cl].cancelledServices += 1;
@@ -319,9 +379,24 @@ export default function PayrollView({
           stats[cl].totalHours += clHours;
           stats[cl].basePay += clBasePay;
           stats[cl].tips += clTip;
+
+          if (isAlreadyPaid) {
+            // Service was already paid (e.g. day 16 paid in 1-16) -> DO NOT sum into pending payout!
+            stats[cl].alreadyPaidServicesCount += 1;
+            stats[cl].alreadyPaidHours += clHours;
+            stats[cl].alreadyPaidBasePay += clBasePay;
+            stats[cl].alreadyPaidTips += clTip;
+            stats[cl].alreadyPaidAmount += clServiceTotal;
+          } else {
+            // Unpaid service -> sum into pending payout
+            stats[cl].pendingServicesCount += 1;
+            stats[cl].pendingHours += clHours;
+            stats[cl].pendingBasePay += clBasePay;
+            stats[cl].pendingTips += clTip;
+          }
         }
 
-        stats[cl].servicesList.push({
+        const svcEntry = {
           id: svc.id,
           rawService: svc,
           fecha: svc.fecha,
@@ -332,21 +407,78 @@ export default function PayrollView({
           tip: clTip,
           subtotal: clServiceTotal,
           status: svc.status || 'activo',
-          pagoEstado: svc.pagoEstado || (isCancelled ? 'Cancelado' : 'Registrado'),
+          isAlreadyPaid,
+          paidRecord,
+          pagoEstado: isCancelled
+            ? 'Cancelado'
+            : isAlreadyPaid
+            ? 'Pagado Previamente'
+            : 'Pendiente',
           coCleaners: svcCleaners.filter((c) => c !== cl),
-        });
+        };
+
+        stats[cl].servicesList.push(svcEntry);
+        if (!isCancelled) {
+          if (isAlreadyPaid) {
+            stats[cl].alreadyPaidServicesList.push(svcEntry);
+          } else {
+            stats[cl].pendingServicesList.push(svcEntry);
+          }
+        }
       });
     });
 
     Object.values(stats).forEach((cs) => {
-      cs.totalPay = parseFloat((cs.basePay + cs.tips + (Number(manualAdjustments[cs.cleaner]) || 0)).toFixed(2));
+      cs.totalPeriodEarnings = parseFloat((cs.basePay + cs.tips + (Number(manualAdjustments[cs.cleaner]) || 0)).toFixed(2));
+      
+      const periodPayment = paymentsMap[buildPaymentKey(cs.cleaner, periodKey)];
+      const isPeriodPaidDirectly = periodPayment && periodPayment.status === 'pagado';
+
+      // Pending pay sums ONLY the unpaid services + adjustment
+      const calculatedPending = parseFloat((cs.pendingBasePay + cs.pendingTips + (Number(manualAdjustments[cs.cleaner]) || 0)).toFixed(2));
+      cs.pendingPay = Math.max(0, calculatedPending);
+
+      if (isPeriodPaidDirectly) {
+        cs.totalPay = periodPayment.amount || cs.totalPeriodEarnings;
+        cs.isPaid = true;
+        cs.paymentStatus = 'pagado';
+        cs.paymentRecord = periodPayment;
+      } else if (cs.totalServices > 0 && cs.pendingServicesCount === 0) {
+        // Every completed service in this period was ALREADY paid in prior/overlapping payrolls (e.g. day 16 paid in 1-16)
+        cs.totalPay = 0;
+        cs.isPaid = true;
+        cs.paymentStatus = 'pagado';
+        cs.allServicesPaidPreviously = true;
+        cs.paymentRecord = {
+          id: `prev_${cs.cleaner}_${periodKey}`,
+          cleaner: cs.cleaner,
+          periodLabel: dateFilterLabel,
+          periodType: periodTypeLabel,
+          amount: cs.totalPeriodEarnings,
+          hours: cs.totalHours,
+          servicesCount: cs.totalServices,
+          status: 'pagado',
+          paidDateFormatted: cs.alreadyPaidServicesList[0]?.paidRecord?.paidDateFormatted || 'Liquidado previamente',
+          paymentMethod: cs.alreadyPaidServicesList[0]?.paidRecord?.paymentMethod || 'Liquidado en nómina previa',
+          reference: cs.alreadyPaidServicesList[0]?.paidRecord?.reference || '',
+          markedBy: cs.alreadyPaidServicesList[0]?.paidRecord?.markedBy || 'Nómina Anterior',
+        };
+      } else {
+        // There are pending unpaid services!
+        // totalPay to transfer is strictly the pending amount (preventing day 16 from being added!)
+        cs.totalPay = cs.pendingPay;
+        cs.isPaid = false;
+        cs.paymentStatus = 'pendiente';
+        cs.paymentRecord = null;
+      }
+
       // Sort each cleaner's services descending by date
       cs.servicesList.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
     });
 
     const list = Object.values(stats);
     return { cleanerStatsMap: stats, allCleanersList: list };
-  }, [cleaners, servicesInPeriod, manualAdjustments]);
+  }, [cleaners, servicesInPeriod, manualAdjustments, paidServicesMap, paymentsMap, periodKey, dateFilterLabel, periodTypeLabel]);
 
   // Status metrics for all cleaners in active period
   const { totalPendientesCount, totalPendientesAmount, totalPagadosCount, totalPagadosAmount } = useMemo(() => {
@@ -357,14 +489,12 @@ export default function PayrollView({
 
     allCleanersList.forEach((cs) => {
       if (cs.totalServices === 0 && cs.totalPay === 0) return;
-      const pKey = buildPaymentKey(cs.cleaner, periodKey);
-      const isPaid = paymentsMap[pKey]?.status === 'pagado';
-      if (isPaid) {
+      if (cs.isPaid) {
         pagCount += 1;
-        pagAmount += cs.totalPay;
+        pagAmount += (cs.paymentRecord?.amount || cs.totalPeriodEarnings);
       } else {
         pendCount += 1;
-        pendAmount += cs.totalPay;
+        pendAmount += cs.totalPay; // Strictly the pending unpaid amount!
       }
     });
 
@@ -374,20 +504,17 @@ export default function PayrollView({
       totalPagadosCount: pagCount,
       totalPagadosAmount: pagAmount,
     };
-  }, [allCleanersList, paymentsMap, periodKey]);
+  }, [allCleanersList]);
 
   // Consolidated table list (sorted by totalPay and filtered by status)
   const payrollList = useMemo(() => {
     const list = allCleanersList
       .map((cs) => {
-        const pKey = buildPaymentKey(cs.cleaner, periodKey);
-        const record = paymentsMap[pKey] || null;
-        const isPaid = record && record.status === 'pagado';
         return {
           ...cs,
-          paymentRecord: record,
-          isPaid,
-          paymentStatus: isPaid ? 'pagado' : 'pendiente',
+          isPaid: cs.isPaid,
+          paymentStatus: cs.paymentStatus,
+          paymentRecord: cs.paymentRecord,
         };
       })
       .filter((cs) => cs.cleaner.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -400,7 +527,7 @@ export default function PayrollView({
     }
 
     return filtered.sort((a, b) => b.totalPay - a.totalPay);
-  }, [allCleanersList, searchTerm, paymentsMap, periodKey, statusFilter]);
+  }, [allCleanersList, searchTerm, statusFilter]);
 
   // Overall totals in the period
   const totalPayroll = useMemo(() => {
@@ -408,7 +535,7 @@ export default function PayrollView({
   }, [allCleanersList]);
 
   const totalPayrollHours = useMemo(() => {
-    return allCleanersList.reduce((sum, item) => sum + item.totalHours, 0);
+    return allCleanersList.reduce((sum, item) => sum + (item.isPaid ? item.totalHours : item.pendingHours), 0);
   }, [allCleanersList]);
 
   const activeCleanersCount = useMemo(() => {
@@ -425,16 +552,27 @@ export default function PayrollView({
 
   // Active individual cleaner data if selected
   const activeCleanerData = selectedCleaner !== 'all' ? cleanerStatsMap[selectedCleaner] : null;
-  const activeCleanerPayment = activeCleanerData ? paymentsMap[buildPaymentKey(activeCleanerData.cleaner, periodKey)] : null;
-  const isActiveCleanerPaid = activeCleanerPayment?.status === 'pagado';
+  const activeCleanerPayment = activeCleanerData?.paymentRecord || paymentsMap[buildPaymentKey(activeCleanerData?.cleaner, periodKey)] || null;
+  const isActiveCleanerPaid = activeCleanerData?.isPaid || activeCleanerPayment?.status === 'pagado';
 
   // Handle opening payment modal
   const handleOpenPayModal = (cleanerRow) => {
+    // Collect ONLY the pending services (unpaid) to be paid!
+    const pendingServices = cleanerRow.pendingServicesList && cleanerRow.pendingServicesList.length > 0
+      ? cleanerRow.pendingServicesList
+      : cleanerRow.servicesList.filter((s) => !s.isAlreadyPaid && s.status !== 'cancelado');
+
+    const amountToPay = cleanerRow.pendingPay != null ? cleanerRow.pendingPay : cleanerRow.totalPay;
+    const hoursToPay = cleanerRow.pendingHours != null ? cleanerRow.pendingHours : cleanerRow.totalHours;
+
     setPayModalTarget({
       cleaner: cleanerRow.cleaner,
-      amount: cleanerRow.totalPay,
-      hours: cleanerRow.totalHours,
-      servicesCount: cleanerRow.totalServices,
+      amount: amountToPay,
+      hours: hoursToPay,
+      servicesCount: pendingServices.length,
+      servicesToPay: pendingServices,
+      alreadyPaidCount: cleanerRow.alreadyPaidServicesCount || 0,
+      alreadyPaidAmount: cleanerRow.alreadyPaidAmount || 0,
       periodLabel: dateFilterLabel,
       periodType: periodTypeLabel,
       periodKey: periodKey,
@@ -455,6 +593,7 @@ export default function PayrollView({
       amount: payModalTarget.amount,
       hours: payModalTarget.hours,
       servicesCount: payModalTarget.servicesCount,
+      servicesToPay: payModalTarget.servicesToPay,
       paymentMethod: payMethod,
       reference: payReference.trim(),
       notes: payNotes.trim(),
@@ -462,6 +601,7 @@ export default function PayrollView({
     });
 
     setPaymentsMap(getPayrollPayments());
+    setPaidServicesMap(getPaidServices());
     setPayModalTarget(null);
   };
 
@@ -470,6 +610,7 @@ export default function PayrollView({
     if (!revertTarget) return;
     markCleanerPayrollAsPending(revertTarget.cleaner, revertTarget.periodKey);
     setPaymentsMap(getPayrollPayments());
+    setPaidServicesMap(getPaidServices());
     setRevertTarget(null);
   };
 
@@ -516,12 +657,24 @@ export default function PayrollView({
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `👤 *Cleaner:* ${activeCleanerData.cleaner}\n`;
     text += `📅 *Modalidad / Período:* ${dateFilterLabel}\n`;
-    text += `🧹 *Turnos Realizados:* ${activeCleanerData.totalServices} turnos\n`;
-    text += `⏱ *Horas Totales:* ${activeCleanerData.totalHours.toFixed(1)} hrs\n`;
-    text += `💵 *Pago Base:* $${activeCleanerData.basePay.toFixed(2)} CAD\n`;
-    if (activeCleanerData.tips > 0) {
-      text += `🎁 *Propinas:* +$${activeCleanerData.tips.toFixed(2)} CAD\n`;
+
+    if (activeCleanerData.alreadyPaidServicesCount > 0 && !isActiveCleanerPaid) {
+      text += `🧹 *Turnos a Liquidar:* ${activeCleanerData.pendingServicesCount} turnos\n`;
+      text += `⏱ *Horas a Liquidar:* ${activeCleanerData.pendingHours.toFixed(1)} hrs\n`;
+      text += `💵 *Pago Base Pendiente:* $${activeCleanerData.pendingBasePay.toFixed(2)} CAD\n`;
+      if (activeCleanerData.pendingTips > 0) {
+        text += `🎁 *Propinas Pendientes:* +$${activeCleanerData.pendingTips.toFixed(2)} CAD\n`;
+      }
+      text += `ℹ️ *Turnos ya pagados en nómina previa:* ${activeCleanerData.alreadyPaidServicesCount} turno(s) ($${activeCleanerData.alreadyPaidAmount.toFixed(2)} CAD) — _Excluidos de este pago para evitar duplicados_\n`;
+    } else {
+      text += `🧹 *Turnos Realizados:* ${activeCleanerData.totalServices} turnos\n`;
+      text += `⏱ *Horas Totales:* ${activeCleanerData.totalHours.toFixed(1)} hrs\n`;
+      text += `💵 *Pago Base:* $${activeCleanerData.basePay.toFixed(2)} CAD\n`;
+      if (activeCleanerData.tips > 0) {
+        text += `🎁 *Propinas:* +$${activeCleanerData.tips.toFixed(2)} CAD\n`;
+      }
     }
+
     if (activeCleanerData.manualAdjustment !== 0) {
       text += `⚖️ *Ajuste / Bono:* ${activeCleanerData.manualAdjustment > 0 ? '+' : ''}$${activeCleanerData.manualAdjustment.toFixed(2)} CAD\n`;
     }
@@ -535,12 +688,18 @@ export default function PayrollView({
       text += `⏳ *ESTADO:* PENDIENTE DE PAGO\n`;
     }
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    text += `*Desglose de Turnos Realizados:*\n`;
+    text += `*Desglose de Turnos:*\n`;
 
     activeCleanerData.servicesList.forEach((s, idx) => {
       const durText = formatHoursAndMinutes(s.horas);
       const isCanc = s.status === 'cancelado';
-      text += `${idx + 1}. ${isCanc ? '❌ [CANCELADO] ' : '🗓 '}${s.fecha} | 🏠 ${s.unidad} | ⏱ ${durText} | 💵 $${s.subtotal.toFixed(2)} CAD\n`;
+      if (isCanc) {
+        text += `${idx + 1}. ❌ [CANCELADO] ${s.fecha} | 🏠 ${s.unidad} | ⏱ ${durText}\n`;
+      } else if (s.isAlreadyPaid) {
+        text += `${idx + 1}. ✅ [YA PAGADO PREVIAMENTE] ${s.fecha} | 🏠 ${s.unidad} | ⏱ ${durText} | 💵 $${s.subtotal.toFixed(2)} CAD (No se suma)\n`;
+      } else {
+        text += `${idx + 1}. 🗓 ${s.fecha} | 🏠 ${s.unidad} | ⏱ ${durText} | 💵 $${s.subtotal.toFixed(2)} CAD\n`;
+      }
     });
 
     text += `\n_Favor de revisar el desglose y corroborar de recibido. ¡Muchas gracias por tu excelente trabajo!_`;
@@ -1135,13 +1294,23 @@ export default function PayrollView({
 
                       {isActiveCleanerPaid ? (
                         <p className="text-xs text-emerald-800 mt-1 font-medium">
-                          Nómina transferida el <strong>{activeCleanerPayment.paidDateFormatted}</strong> por <strong>{activeCleanerPayment.markedBy || 'Admin'}</strong> mediante <strong>{activeCleanerPayment.paymentMethod}</strong>
-                          {activeCleanerPayment.reference && <span> (Ref: <code>{activeCleanerPayment.reference}</code>)</span>}.
+                          Nómina transferida el <strong>{activeCleanerPayment?.paidDateFormatted || 'Completado'}</strong> por <strong>{activeCleanerPayment?.markedBy || 'Admin'}</strong> mediante <strong>{activeCleanerPayment?.paymentMethod || 'E-Transfer'}</strong>
+                          {activeCleanerPayment?.reference && <span> (Ref: <code>{activeCleanerPayment.reference}</code>)</span>}.
                         </p>
                       ) : (
-                        <p className="text-xs text-amber-800 mt-1 font-medium">
-                          Esta nómina de <strong>${activeCleanerData.totalPay.toFixed(2)} CAD</strong> ({activeCleanerData.totalHours.toFixed(1)} hrs en {activeCleanerData.totalServices} turnos) está pendiente de dispersión para {dateFilterLabel}.
-                        </p>
+                        <div>
+                          <p className="text-xs text-amber-800 mt-1 font-medium">
+                            Esta nómina tiene un saldo pendiente de <strong>${activeCleanerData.totalPay.toFixed(2)} CAD</strong> ({activeCleanerData.pendingHours.toFixed(1)} hrs en {activeCleanerData.pendingServicesCount} turnos pendientes) para {dateFilterLabel}.
+                          </p>
+                          {activeCleanerData.alreadyPaidServicesCount > 0 && (
+                            <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg text-xs font-semibold">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>
+                                {activeCleanerData.alreadyPaidServicesCount} turno{activeCleanerData.alreadyPaidServicesCount > 1 ? 's' : ''} (${activeCleanerData.alreadyPaidAmount.toFixed(2)} CAD) ya pagado{activeCleanerData.alreadyPaidServicesCount > 1 ? 's' : ''} en nómina previa (excluido de este pago).
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1176,7 +1345,12 @@ export default function PayrollView({
                         className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 active:scale-98"
                       >
                         <CreditCard className="w-4 h-4" />
-                        <span>Marcar esta Nómina como Pagada</span>
+                        <span>
+                          {activeCleanerData.alreadyPaidServicesCount > 0
+                            ? `Pagar Turnos Pendientes ($${activeCleanerData.totalPay.toFixed(2)} CAD)`
+                            : `Marcar esta Nómina como Pagada ($${activeCleanerData.totalPay.toFixed(2)} CAD)`
+                          }
+                        </span>
                       </button>
                     )}
                   </div>
@@ -1249,21 +1423,33 @@ export default function PayrollView({
                   {/* Total To Transfer */}
                   <div className="bg-white/10 backdrop-blur-xs p-4 rounded-xl border border-white/15 text-left md:text-right">
                     <span className="text-[11px] uppercase tracking-wider text-slate-300 font-bold block">
-                      Total Neto a Transferir ({periodTypeLabel})
+                      {isActiveCleanerPaid ? 'Total Liquidado' : 'Total Neto a Transferir'} ({periodTypeLabel})
                     </span>
                     <span className="text-3xl font-serif font-bold text-[#FFB566] tabular-nums block mt-0.5">
                       ${activeCleanerData.totalPay.toFixed(2)} CAD
                     </span>
+                    {activeCleanerData.alreadyPaidServicesCount > 0 && !isActiveCleanerPaid && (
+                      <span className="text-[10px] text-emerald-300 font-bold block mt-1">
+                        Excluye ${activeCleanerData.alreadyPaidAmount.toFixed(2)} CAD de {activeCleanerData.alreadyPaidServicesCount} turno{activeCleanerData.alreadyPaidServicesCount > 1 ? 's' : ''} ya pagado{activeCleanerData.alreadyPaidServicesCount > 1 ? 's' : ''}
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 {/* Summary Metric Tiles */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <span className="text-xs text-slate-500 font-medium block">Turnos Computados</span>
-                    <span className="text-xl font-bold text-[#0B1D4A] tabular-nums mt-0.5 block">
-                      {activeCleanerData.totalServices} turnos
+                    <span className="text-xs text-slate-500 font-medium block">
+                      {isActiveCleanerPaid ? 'Turnos Computados' : 'Turnos a Pagar'}
                     </span>
+                    <span className="text-xl font-bold text-[#0B1D4A] tabular-nums mt-0.5 block">
+                      {isActiveCleanerPaid ? activeCleanerData.totalServices : activeCleanerData.pendingServicesCount} turnos
+                    </span>
+                    {activeCleanerData.alreadyPaidServicesCount > 0 && !isActiveCleanerPaid && (
+                      <span className="text-[10px] text-emerald-700 font-bold block mt-0.5">
+                        {activeCleanerData.alreadyPaidServicesCount} turno{activeCleanerData.alreadyPaidServicesCount > 1 ? 's' : ''} ya liquidado{activeCleanerData.alreadyPaidServicesCount > 1 ? 's' : ''}
+                      </span>
+                    )}
                     {activeCleanerData.cancelledServices > 0 && (
                       <span className="text-[10px] text-rose-600 font-bold block mt-0.5">
                         +{activeCleanerData.cancelledServices} turnos cancelados
@@ -1272,12 +1458,14 @@ export default function PayrollView({
                   </div>
 
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <span className="text-xs text-slate-500 font-medium block">Horas Efectivas</span>
+                    <span className="text-xs text-slate-500 font-medium block">
+                      {isActiveCleanerPaid ? 'Horas Efectivas' : 'Horas por Pagar'}
+                    </span>
                     <span className="text-xl font-bold text-[#0B1D4A] tabular-nums mt-0.5 block">
-                      {activeCleanerData.totalHours.toFixed(1)} hrs
+                      {(isActiveCleanerPaid ? activeCleanerData.totalHours : activeCleanerData.pendingHours).toFixed(1)} hrs
                     </span>
                     <span className="text-[10px] text-slate-400 block mt-0.5">
-                      {formatHoursAndMinutes(activeCleanerData.totalHours)}
+                      {formatHoursAndMinutes(isActiveCleanerPaid ? activeCleanerData.totalHours : activeCleanerData.pendingHours)}
                     </span>
                   </div>
 
@@ -1361,17 +1549,25 @@ export default function PayrollView({
                         <tbody className="divide-y divide-slate-100">
                           {activeCleanerData.servicesList.map((svc) => {
                             const isCancelled = svc.status === 'cancelado';
+                            const isPaidPrev = svc.isAlreadyPaid;
                             return (
                               <tr
                                 key={svc.id}
                                 className={`transition-colors ${
                                   isCancelled
                                     ? 'bg-rose-50/50 text-slate-400 line-through'
+                                    : isPaidPrev
+                                    ? 'bg-emerald-50/50 hover:bg-emerald-50 text-slate-800'
                                     : 'hover:bg-amber-50/40 text-slate-800'
                                 }`}
                               >
                                 <td className="px-4 py-3 font-semibold whitespace-nowrap">
-                                  {svc.fecha}
+                                  <div className="flex items-center gap-1.5">
+                                    {isPaidPrev && (
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" title="Turno ya liquidado en nómina previa (no se vuelve a sumar)" />
+                                    )}
+                                    <span>{svc.fecha}</span>
+                                  </div>
                                 </td>
                                 <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap">
                                   <div className="flex items-center gap-1.5">
@@ -1398,17 +1594,32 @@ export default function PayrollView({
                                 <td className="px-4 py-3 text-right text-amber-700 font-semibold tabular-nums whitespace-nowrap">
                                   {svc.tip > 0 ? `+$${svc.tip.toFixed(2)}` : '—'}
                                 </td>
-                                <td className="px-4 py-3 text-right font-bold text-[#0B1D4A] tabular-nums whitespace-nowrap">
-                                  ${svc.subtotal.toFixed(2)}
+                                <td className="px-4 py-3 text-right font-bold tabular-nums whitespace-nowrap">
+                                  {isPaidPrev ? (
+                                    <div className="flex flex-col items-end">
+                                      <span className="text-emerald-900">${svc.subtotal.toFixed(2)}</span>
+                                      <span className="text-[9px] text-emerald-700 font-bold uppercase tracking-tight">Ya Pagado</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[#0B1D4A]">${svc.subtotal.toFixed(2)}</span>
+                                  )}
                                 </td>
                                 <td className="px-4 py-3 text-center whitespace-nowrap">
                                   {isCancelled ? (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold">
                                       <Ban className="w-3 h-3 text-rose-600" /> Cancelado
                                     </span>
+                                  ) : isPaidPrev ? (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300"
+                                      title={svc.paidRecord?.periodLabel ? `Liquidado en: ${svc.paidRecord.periodLabel}` : 'Liquidado en nómina previa'}
+                                    >
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                      <span>Ya Pagado</span>
+                                    </span>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Completado
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                                      <Clock className="w-3 h-3 text-amber-600" /> Pendiente
                                     </span>
                                   )}
                                 </td>
@@ -1430,18 +1641,38 @@ export default function PayrollView({
                         </tbody>
                         {activeCleanerData.servicesList.length > 0 && (
                           <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-300">
+                            {activeCleanerData.alreadyPaidServicesCount > 0 && !isActiveCleanerPaid && (
+                              <tr className="bg-emerald-50/60 text-emerald-950 text-[11px] border-b border-emerald-200">
+                                <td colSpan={3} className="px-4 py-2 font-semibold">
+                                  ✓ Turnos ya pagados previamente en otros rangos (excluidos de este pago):
+                                </td>
+                                <td className="px-4 py-2 text-center tabular-nums">
+                                  {activeCleanerData.alreadyPaidHours.toFixed(1)} h
+                                </td>
+                                <td className="px-4 py-2 text-right tabular-nums">
+                                  ${activeCleanerData.alreadyPaidBasePay.toFixed(2)}
+                                </td>
+                                <td className="px-4 py-2 text-right tabular-nums">
+                                  {activeCleanerData.alreadyPaidTips > 0 ? `+$${activeCleanerData.alreadyPaidTips.toFixed(2)}` : '—'}
+                                </td>
+                                <td className="px-4 py-2 text-right tabular-nums font-bold text-emerald-800">
+                                  -${activeCleanerData.alreadyPaidAmount.toFixed(2)} CAD
+                                </td>
+                                <td colSpan={onEditService ? 2 : 1}></td>
+                              </tr>
+                            )}
                             <tr>
                               <td colSpan={3} className="px-4 py-3 text-slate-800 font-serif">
-                                Total General de Nómina ({activeCleanerData.cleaner}):
+                                {isActiveCleanerPaid ? 'Total Liquidado en este Período' : 'Saldo Neto Pendiente a Transferir'} ({activeCleanerData.cleaner}):
                               </td>
                               <td className="px-4 py-3 text-center text-slate-900 tabular-nums font-bold">
-                                {activeCleanerData.totalHours.toFixed(1)} h
+                                {(isActiveCleanerPaid ? activeCleanerData.totalHours : activeCleanerData.pendingHours).toFixed(1)} h
                               </td>
                               <td className="px-4 py-3 text-right text-slate-900 tabular-nums font-bold">
-                                ${activeCleanerData.basePay.toFixed(2)}
+                                ${(isActiveCleanerPaid ? activeCleanerData.basePay : activeCleanerData.pendingBasePay).toFixed(2)}
                               </td>
                               <td className="px-4 py-3 text-right text-amber-700 tabular-nums font-bold">
-                                +${activeCleanerData.tips.toFixed(2)}
+                                +${(isActiveCleanerPaid ? activeCleanerData.tips : activeCleanerData.pendingTips).toFixed(2)}
                               </td>
                               <td className="px-4 py-3 text-right text-[#0B1D4A] tabular-nums text-sm font-serif font-bold">
                                 ${activeCleanerData.totalPay.toFixed(2)} CAD
@@ -1613,19 +1844,33 @@ export default function PayrollView({
                               <span className="group-hover:text-[#0B1D4A] group-hover:underline">{row.cleaner}</span>
                             </td>
                             <td className="px-5 py-3.5 text-center text-slate-600 tabular-nums font-medium">
-                              {row.totalServices} turnos
+                              {row.isPaid ? (
+                                <span>{row.totalServices} turnos</span>
+                              ) : row.alreadyPaidServicesCount > 0 ? (
+                                <div className="flex flex-col items-center">
+                                  <span className="font-bold text-slate-800">{row.pendingServicesCount} pendientes</span>
+                                  <span className="text-[10px] text-emerald-700 font-semibold">({row.alreadyPaidServicesCount} ya pagado)</span>
+                                </div>
+                              ) : (
+                                <span>{row.totalServices} turnos</span>
+                              )}
                             </td>
                             <td className="px-5 py-3.5 text-right font-medium text-slate-700 tabular-nums">
-                              {row.totalHours.toFixed(1)} h
+                              {(row.isPaid ? row.totalHours : row.pendingHours).toFixed(1)} h
                             </td>
                             <td className="px-5 py-3.5 text-right text-slate-700 tabular-nums">
-                              ${row.basePay.toFixed(2)}
+                              ${(row.isPaid ? row.basePay : row.pendingBasePay).toFixed(2)}
                             </td>
                             <td className="px-5 py-3.5 text-right text-amber-700 font-bold tabular-nums">
-                              {row.tips > 0 ? `+$${row.tips.toFixed(2)}` : '—'}
+                              {(row.isPaid ? row.tips : row.pendingTips) > 0 ? `+$${(row.isPaid ? row.tips : row.pendingTips).toFixed(2)}` : '—'}
                             </td>
                             <td className="px-5 py-3.5 text-right font-bold text-[#0B1D4A] tabular-nums text-sm font-serif">
                               ${row.totalPay.toFixed(2)} CAD
+                              {row.alreadyPaidServicesCount > 0 && !row.isPaid && (
+                                <span className="block text-[10px] font-sans font-normal text-emerald-700">
+                                  (excluye ${row.alreadyPaidAmount.toFixed(2)} ya pagado)
+                                </span>
+                              )}
                             </td>
 
                             {/* ESTADO DE PAGO COLUMN */}
@@ -1639,18 +1884,20 @@ export default function PayrollView({
                                   <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
                                     {rec?.paidDateFormatted?.split(',')[0] || 'Completado'}
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setRevertTarget({
-                                      cleaner: row.cleaner,
-                                      periodKey,
-                                      periodLabel: dateFilterLabel
-                                    })}
-                                    className="text-[10px] text-slate-400 hover:text-rose-600 underline font-medium"
-                                    title="Revertir este pago a pendiente"
-                                  >
-                                    Revertir
-                                  </button>
+                                  {!row.allServicesPaidPreviously && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setRevertTarget({
+                                        cleaner: row.cleaner,
+                                        periodKey,
+                                        periodLabel: dateFilterLabel
+                                      })}
+                                      className="text-[10px] text-slate-400 hover:text-rose-600 underline font-medium"
+                                      title="Revertir este pago a pendiente"
+                                    >
+                                      Revertir
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
                                 <div className="inline-flex flex-col items-center gap-1.5">
@@ -1665,7 +1912,12 @@ export default function PayrollView({
                                     title="Marcar nómina de este cleaner como pagada"
                                   >
                                     <CreditCard className="w-3 h-3" />
-                                    <span>Marcar Pagado</span>
+                                    <span>
+                                      {row.alreadyPaidServicesCount > 0
+                                        ? `Pagar $${row.totalPay.toFixed(2)}`
+                                        : 'Marcar Pagado'
+                                      }
+                                    </span>
                                   </button>
                                 </div>
                               )}
@@ -1934,13 +2186,13 @@ export default function PayrollView({
               <div className="bg-[#FFF8EC] border border-[#FFB566]/60 rounded-2xl p-4 flex items-center justify-between">
                 <div>
                   <span className="text-[11px] uppercase tracking-wider text-amber-900 font-bold block">
-                    Monto Total a Pagar ({payModalTarget.periodType})
+                    {payModalTarget.alreadyPaidCount > 0 ? 'Monto Neto a Dispersar (Pendiente)' : `Monto Total a Pagar (${payModalTarget.periodType})`}
                   </span>
                   <span className="text-3xl font-serif font-bold text-[#0B1D4A] tabular-nums mt-0.5 block">
                     ${payModalTarget.amount.toFixed(2)} CAD
                   </span>
                   <span className="text-xs text-amber-800 mt-0.5 block">
-                    {payModalTarget.hours.toFixed(1)} hrs acumuladas en {payModalTarget.servicesCount} turnos
+                    {payModalTarget.hours.toFixed(1)} hrs en {payModalTarget.servicesCount} turnos pendientes
                   </span>
                 </div>
 
@@ -1952,6 +2204,21 @@ export default function PayrollView({
                   </span>
                 </div>
               </div>
+
+              {/* Already Paid Exclusion Notice */}
+              {payModalTarget.alreadyPaidCount > 0 && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs text-emerald-950 flex items-start gap-2.5 shadow-2xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-bold block">
+                      Protección contra pagos duplicados activa
+                    </span>
+                    <p className="text-[11px] text-emerald-900 leading-relaxed">
+                      Se detectaron <strong>{payModalTarget.alreadyPaidCount} turno{payModalTarget.alreadyPaidCount > 1 ? 's' : ''} (${payModalTarget.alreadyPaidAmount.toFixed(2)} CAD)</strong> en este rango que ya habían sido marcados como pagados con anterioridad. <strong>No se sumarán de nuevo</strong> y han sido excluidos automáticamente de esta dispersión.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Payment Method */}
               <div>
