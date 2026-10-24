@@ -1,7 +1,9 @@
 import React from 'react';
 import { Clock, DollarSign, TrendingUp, CheckCircle2, Users } from 'lucide-react';
 
-export default function StatsCards({ services, showFinances, periodFilter, setPeriodFilter }) {
+export default function StatsCards({ services, showFinances, currentUser, periodFilter, setPeriodFilter }) {
+  const isSupervisorFer = (currentUser?.username || '').toLowerCase() === 'fercastil';
+
   // Filter services by period
   const now = new Date();
   const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -28,6 +30,9 @@ export default function StatsCards({ services, showFinances, periodFilter, setPe
   const totalCleanerPay = filteredServices.reduce((sum, s) => {
     if (s.status === 'cancelado') return sum;
     if (s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).length > 0) {
+      if (isSupervisorFer) {
+        return sum + (Number(s.pagosPorCleaner['Maria'] || s.pagosPorCleaner['maria'] || 0));
+      }
       return sum + Object.values(s.pagosPorCleaner).reduce((pSum, v) => pSum + (Number(v) || 0), 0);
     }
     return sum + (Number(s.pagoCleaner) || 0);
@@ -93,16 +98,37 @@ export default function StatsCards({ services, showFinances, periodFilter, setPe
         </div>
 
         <span className="text-xs text-slate-500 font-medium">
-          {filteredServices.length} servicios registrados
+          {filteredServices.length} {isSupervisorFer ? 'servicios de María' : 'servicios registrados'}
         </span>
       </div>
 
       {/* KPI Metric Cards Grid */}
-      <div className={`grid gap-3.5 ${showFinances ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' : 'grid-cols-2 md:grid-cols-3'}`}>
+      <div className={`grid gap-3.5 ${showFinances ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' : isSupervisorFer ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2 md:grid-cols-3'}`}>
+        {/* Total Turnos */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-medium tracking-tight">
+              {isSupervisorFer ? 'Turnos de María' : 'Turnos Registrados'}
+            </span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              {totalServices}
+            </span>
+            <span className="text-xs text-slate-500 font-medium">turnos</span>
+          </div>
+          <span className="text-[11px] text-slate-400 mt-1">
+            {isSupervisorFer ? 'Servicios asignados a María' : 'Activos en el período'}
+          </span>
+        </div>
+
         {/* Total Hours */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-medium tracking-tight">Horas Operadas</span>
+            <span className="text-xs font-medium tracking-tight">
+              {isSupervisorFer ? 'Horas de María' : 'Horas Operadas'}
+            </span>
             <Clock className="w-4 h-4 text-sky-600" />
           </div>
           <div className="flex items-baseline gap-1">
@@ -119,7 +145,9 @@ export default function StatsCards({ services, showFinances, periodFilter, setPe
         {/* Total Payout to Cleaners */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-medium tracking-tight">Pago a Cleaners</span>
+            <span className="text-xs font-medium tracking-tight">
+              {isSupervisorFer ? 'Pago a María' : 'Pago a Cleaners'}
+            </span>
             <Users className="w-4 h-4 text-amber-600" />
           </div>
           <div className="flex items-baseline gap-1">
@@ -129,26 +157,28 @@ export default function StatsCards({ services, showFinances, periodFilter, setPe
             <span className="text-xs text-slate-500 font-medium">CAD</span>
           </div>
           <span className="text-[11px] text-slate-400 mt-1">
-            {totalTips > 0 ? `+ $${totalTips} en tips` : 'Nómina cleaners'}
+            {totalTips > 0 ? `+ $${totalTips} en tips` : (isSupervisorFer ? 'Nómina de María' : 'Nómina cleaners')}
           </span>
         </div>
 
-        {/* Total Payout to Cleaning Team */}
-        <div className="bg-white p-4 rounded-2xl border border-sky-100 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-medium tracking-tight text-sky-900">Pago a Cleaning Team</span>
-            <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-bold">Team</span>
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold tracking-tight text-sky-900 tabular-nums">
-              ${totalTeamPay.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+        {/* Total Payout to Cleaning Team (Visible ONLY if not restricted Fer Castil) */}
+        {!isSupervisorFer && (
+          <div className="bg-white p-4 rounded-2xl border border-sky-100 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-xs font-medium tracking-tight text-sky-900">Pago a Cleaning Team</span>
+              <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-bold">Team</span>
+            </div>
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-bold tracking-tight text-sky-900 tabular-nums">
+                ${totalTeamPay.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </span>
+              <span className="text-xs text-slate-500 font-medium">CAD</span>
+            </div>
+            <span className="text-[11px] text-sky-700 font-medium mt-1">
+              Costo de equipos externos
             </span>
-            <span className="text-xs text-slate-500 font-medium">CAD</span>
           </div>
-          <span className="text-[11px] text-sky-700 font-medium mt-1">
-            Costo de equipos externos
-          </span>
-        </div>
+        )}
 
         {/* Revenue (Admins with Full Access only) */}
         {showFinances && (

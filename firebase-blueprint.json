@@ -1,0 +1,159 @@
+{
+  "entities": {
+    "Service": {
+      "title": "Service",
+      "description": "Cleaning or extra task service record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique service identifier" },
+        "fecha": { "type": "string", "description": "Date of service in YYYY-MM-DD" },
+        "unidad": { "type": "string", "description": "Unit or property name" },
+        "cleaner": { "type": "string", "description": "Primary cleaner name" },
+        "cleaners": { "type": "array", "description": "List of cleaners assigned" },
+        "horas": { "type": "number", "description": "Duration in hours" },
+        "tipo": { "type": "string", "description": "Type of service (Limpieza, Extra Task, etc.)" },
+        "cobro": { "type": "number", "description": "Amount charged to client" },
+        "pagoCleaner": { "type": "number", "description": "Payment to cleaner" },
+        "pagoCleaningTeam": { "type": "number", "description": "Total payment to cleaning team" },
+        "pagosPorCleaner": { "type": "object", "description": "Individual cleaner payout breakdown" },
+        "ratesPorCleaner": { "type": "object", "description": "Individual cleaner hourly rates" },
+        "tip": { "type": "number", "description": "Tip amount" },
+        "capturista": { "type": "string", "description": "User or supervisor who recorded the service" },
+        "status": { "type": "string", "description": "Status (activo, cancelado)" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "required": ["fecha", "unidad", "horas"]
+    },
+    "ScheduleShift": {
+      "title": "ScheduleShift",
+      "description": "Scheduled shift or booking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Shift identifier" },
+        "fecha": { "type": "string", "description": "Shift date in YYYY-MM-DD" },
+        "unidad": { "type": "string", "description": "Unit name" },
+        "cleaner": { "type": "string", "description": "Primary cleaner" },
+        "cleaners": { "type": "array", "description": "Cleaners list" },
+        "horario": { "type": "string", "description": "Time slot or range" },
+        "horas": { "type": "number", "description": "Estimated hours" },
+        "tipo": { "type": "string", "description": "Type of service" },
+        "status": { "type": "string", "description": "Shift status" },
+        "notes": { "type": "string", "description": "Operational notes" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["fecha", "unidad"]
+    },
+    "Cleaner": {
+      "title": "Cleaner",
+      "description": "Operational cleaner directory item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Cleaner ID or name slug" },
+        "name": { "type": "string", "description": "Cleaner display name" },
+        "active": { "type": "boolean", "description": "Active status" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["name"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Client or property unit directory item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Client ID" },
+        "name": { "type": "string", "description": "Client or unit name" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["name"]
+    },
+    "StockUnitItem": {
+      "title": "StockUnitItem",
+      "description": "Stock of cleaning supplies inside a specific unit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Item ID" },
+        "unidad": { "type": "string", "description": "Unit name" },
+        "categoria": { "type": "string", "description": "Category" },
+        "producto": { "type": "string", "description": "Product name" },
+        "unidad_medida": { "type": "string", "description": "Unit of measurement" },
+        "qty": { "type": "number", "description": "Quantity in unit" },
+        "min_qty": { "type": "number", "description": "Minimum required" },
+        "updatedAt": { "type": "string", "description": "Timestamp" }
+      },
+      "required": ["unidad", "producto"]
+    },
+    "StockStorageItem": {
+      "title": "StockStorageItem",
+      "description": "Stock item in central warehouse",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Item ID" },
+        "categoria": { "type": "string", "description": "Category" },
+        "producto": { "type": "string", "description": "Product name" },
+        "unidad_medida": { "type": "string", "description": "Unit of measurement" },
+        "qty": { "type": "number", "description": "Quantity" },
+        "min_qty": { "type": "number", "description": "Minimum required" },
+        "updatedAt": { "type": "string", "description": "Timestamp" }
+      },
+      "required": ["producto"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Operational audit log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Log ID" },
+        "timestamp": { "type": "string", "description": "Timestamp" },
+        "action": { "type": "string", "description": "Action performed" },
+        "user": { "type": "string", "description": "Username who performed action" },
+        "details": { "type": "string", "description": "Details description" }
+      },
+      "required": ["action", "user"]
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Global application setting such as service rates or paid payroll periods",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Setting key identifier" },
+        "data": { "type": "object", "description": "Arbitrary configuration data" },
+        "updatedAt": { "type": "string", "description": "Timestamp" }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/services/{serviceId}": {
+      "schema": { "$ref": "#/entities/Service" },
+      "description": "Services recorded by administrators and supervisors"
+    },
+    "/schedule/{shiftId}": {
+      "schema": { "$ref": "#/entities/ScheduleShift" },
+      "description": "Cleaning team schedule shifts"
+    },
+    "/cleaners/{cleanerId}": {
+      "schema": { "$ref": "#/entities/Cleaner" },
+      "description": "Registered cleaners"
+    },
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Registered clients and units"
+    },
+    "/stock_by_unit/{itemId}": {
+      "schema": { "$ref": "#/entities/StockUnitItem" },
+      "description": "Inventory inside rental units"
+    },
+    "/stock_storage/{itemId}": {
+      "schema": { "$ref": "#/entities/StockStorageItem" },
+      "description": "Warehouse inventory"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "System audit trail"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AppSetting" },
+      "description": "Rates, paid payroll records, and global configuration"
+    }
+  }
+}

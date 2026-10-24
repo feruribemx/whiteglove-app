@@ -14,6 +14,7 @@ export default function Navbar({
   onOpenNewService,
   onOpenAuditLog,
   onOpenAddCleaner,
+  onOpenDiagnostics,
   onPreviewLanding,
   lang = 'es',
   setLang,
@@ -164,7 +165,11 @@ export default function Navbar({
                     {currentUser?.displayName || currentUser?.username}
                   </span>
                   <span className="text-[10px] text-slate-400 capitalize">
-                    {currentUser?.role === 'admin' ? (lang === 'en' ? 'Admin' : 'Administrador') : 'Cleaner'}
+                    {(currentUser?.username || '').toLowerCase() === 'fercastil'
+                      ? (lang === 'en' ? 'Supervisor' : 'Supervisora')
+                      : currentUser?.role === 'admin'
+                      ? (lang === 'en' ? 'Admin' : 'Administrador')
+                      : 'Cleaner'}
                   </span>
                 </div>
 
@@ -188,7 +193,13 @@ export default function Navbar({
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FFB566]/20 text-[#FFB566]">
                             <Shield className="w-3 h-3" />
-                            <span>{currentUser?.role === 'admin' ? (lang === 'en' ? 'Admin' : 'Administrador') : 'Cleaner'}</span>
+                            <span>
+                              {(currentUser?.username || '').toLowerCase() === 'fercastil'
+                                ? (lang === 'en' ? 'Supervisor' : 'Supervisora')
+                                : currentUser?.role === 'admin'
+                                ? (lang === 'en' ? 'Admin' : 'Administrador')
+                                : 'Cleaner'}
+                            </span>
                           </span>
                         </div>
                       </div>
@@ -240,6 +251,28 @@ export default function Navbar({
                             </span>
                           </div>
                         </button>
+
+                        {onOpenDiagnostics && (
+                          <button
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              onOpenDiagnostics();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
+                          >
+                            <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-300 shrink-0">
+                              <Sparkles className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                              <span className="block font-semibold">
+                                {lang === 'en' ? 'Live System Tests & Diagnostics' : 'Pruebas & Diagnóstico del Sistema'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block font-normal">
+                                {lang === 'en' ? 'Run real-time multi-device tests, WhatsApp checks & memory validation' : 'Ejecuta pruebas en vivo de memoria, WhatsApp y Firestore'}
+                              </span>
+                            </div>
+                          </button>
+                        )}
                       </>
                     )}
 

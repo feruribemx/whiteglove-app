@@ -19,9 +19,8 @@ export default function ServiceModal({
   rates,
   currentUser,
   services = [],
+  clientMemory = null,
 }) {
-  if (!isOpen) return null;
-
   const showFinancials = hasFullAccess(currentUser);
   const canEditPay = canManagePagos(currentUser);
   const isCleaner = currentUser?.role === 'cleaner';
@@ -108,7 +107,7 @@ export default function ServiceModal({
       setPagosPorCleaner(serviceToEdit.pagosPorCleaner || {});
       setCapturista(serviceToEdit.capturista || loggedCleanerName);
 
-      const mem = resolveClientMemory(selectedUnit, services);
+      const mem = resolveClientMemory(selectedUnit, services, clientMemory);
       setMemoryInfo(mem);
 
       if (serviceToEdit.isDuplicate) {
@@ -133,7 +132,7 @@ export default function ServiceModal({
       setCapturista(loggedCleanerName || 'WhiteGlove');
 
       // Automatic memory recall for default client
-      const mem = resolveClientMemory(initialUnit, services);
+      const mem = resolveClientMemory(initialUnit, services, clientMemory);
       setMemoryInfo(mem);
 
       if (mem && mem.cobro != null && mem.cobro > 0) {
@@ -217,7 +216,7 @@ export default function ServiceModal({
     setUnidad(newUnit);
     // When creating a new service or duplicating, auto-populate from client memory
     if (!serviceToEdit || serviceToEdit.isDuplicate) {
-      const mem = resolveClientMemory(newUnit, services);
+      const mem = resolveClientMemory(newUnit, services, clientMemory);
       setMemoryInfo(mem);
       if (mem && mem.cobro != null && mem.cobro > 0) {
         setCobro(String(mem.cobro));
@@ -241,7 +240,7 @@ export default function ServiceModal({
         setAutofillBanner(null);
       }
     } else {
-      const mem = resolveClientMemory(newUnit, services);
+      const mem = resolveClientMemory(newUnit, services, clientMemory);
       setMemoryInfo(mem);
     }
   };
@@ -363,6 +362,8 @@ export default function ServiceModal({
   };
 
   const totalDecimalHours = computeDecimalHours(horasEnteras, minutos);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
@@ -794,7 +795,7 @@ export default function ServiceModal({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            {canEditPay && (
+            {showFinancials && (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Pago Team (Opcional)</label>
                 <div className="relative">

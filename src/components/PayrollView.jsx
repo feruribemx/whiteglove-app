@@ -105,6 +105,13 @@ export default function PayrollView({
   onOpenAddCleaner,
   currentUser,
 }) {
+  const isSupervisorFer = Boolean(
+    currentUser && (currentUser.username || '').toLowerCase() === 'fercastil'
+  );
+  const effectiveCleaners = useMemo(() => {
+    return cleaners;
+  }, [cleaners]);
+
   // Top Level Payroll Tab: 'current' (Control de Nómina) | 'history' (Historial de Pagos)
   const [payrollTab, setPayrollTab] = useState('current');
 
@@ -129,7 +136,7 @@ export default function PayrollView({
   const [customEnd, setCustomEnd] = useState(() => toDateStr(new Date()));
 
   // Cleaner Filter: 'all' or cleaner name
-  const [selectedCleaner, setSelectedCleaner] = useState('all');
+  const [selectedCleaner, setSelectedCleaner] = useState(() => (isSupervisorFer ? 'Maria' : 'all'));
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pendiente' | 'pagado'
   const [copiedNotification, setCopiedNotification] = useState(false);
@@ -280,7 +287,7 @@ export default function PayrollView({
     const stats = {};
 
     // Initialize all cleaners
-    cleaners.forEach((c) => {
+    effectiveCleaners.forEach((c) => {
       stats[c] = {
         cleaner: c,
         totalServices: 0,
@@ -322,6 +329,7 @@ export default function PayrollView({
       const isCancelled = svc.status === 'cancelado';
 
       svcCleaners.forEach((cl) => {
+        if (isSupervisorFer && cl.trim().toLowerCase() !== 'maria') return;
         if (!stats[cl]) {
           stats[cl] = {
             cleaner: cl,
@@ -478,7 +486,7 @@ export default function PayrollView({
 
     const list = Object.values(stats);
     return { cleanerStatsMap: stats, allCleanersList: list };
-  }, [cleaners, servicesInPeriod, manualAdjustments, paidServicesMap, paymentsMap, periodKey, dateFilterLabel, periodTypeLabel]);
+  }, [effectiveCleaners, isSupervisorFer, servicesInPeriod, manualAdjustments, paidServicesMap, paymentsMap, periodKey, dateFilterLabel, periodTypeLabel]);
 
   // Status metrics for all cleaners in active period
   const { totalPendientesCount, totalPendientesAmount, totalPagadosCount, totalPagadosAmount } = useMemo(() => {
@@ -624,6 +632,9 @@ export default function PayrollView({
   const fullPaymentHistory = useMemo(() => {
     const all = getAllPaymentHistory();
     return all.filter((rec) => {
+      if (isSupervisorFer && (rec.cleaner || '').trim().toLowerCase() !== 'maria') {
+        return false;
+      }
       if (historyCleanerFilter !== 'all' && rec.cleaner !== historyCleanerFilter) {
         return false;
       }
@@ -634,11 +645,14 @@ export default function PayrollView({
       }
       return true;
     });
-  }, [historyCleanerFilter, historySearch, paymentsMap]);
+  }, [isSupervisorFer, historyCleanerFilter, historySearch, paymentsMap]);
 
   // Overall history statistics
   const historyStats = useMemo(() => {
-    const all = getAllPaymentHistory();
+    const all = getAllPaymentHistory().filter((r) => {
+      if (isSupervisorFer) return (r.cleaner || '').trim().toLowerCase() === 'maria';
+      return true;
+    });
     const totalPaid = all.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
     const distinctCleaners = new Set(all.map((r) => r.cleaner)).size;
     return {
@@ -646,7 +660,7 @@ export default function PayrollView({
       count: all.length,
       distinctCleaners,
     };
-  }, [paymentsMap]);
+  }, [isSupervisorFer, paymentsMap]);
 
   // Generate WhatsApp summary text for screenshot / messaging
   const getWhatsAppMessage = () => {
@@ -717,8 +731,29 @@ export default function PayrollView({
   const sendWhatsAppDirect = () => {
     const text = getWhatsAppMessage();
     if (!text) return;
-    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+
+    // Find cleaner phone if registered in the team
+    const cleanerObj = (cleaners || []).find((c) => {
+      const n = typeof c === 'string' ? c : c?.name;
+      return (n || '').trim().toLowerCase() === (activeCleanerData?.cleaner || '').trim().toLowerCase();
+    });
+    const rawPhone = typeof cleanerObj === 'object' && cleanerObj?.phone ? String(cleanerObj.phone).replace(/\D/g, '') : '';
+    const url = rawPhone
+      ? `https://wa.me/${rawPhone}?text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+
+    try {
+      const win = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!win) {
+        navigator.clipboard.writeText(text);
+        setCopiedNotification(true);
+        setTimeout(() => setCopiedNotification(false), 3500);
+      }
+    } catch {
+      navigator.clipboard.writeText(text);
+      setCopiedNotification(true);
+      setTimeout(() => setCopiedNotification(false), 3500);
+    }
   };
 
   const handlePrint = () => {
@@ -829,7 +864,7 @@ export default function PayrollView({
             </button>
           )}
 
-          {currentUser?.role === 'admin' && onOpenAddCleaner && (
+          {currentUser?.role === 'admin' && !isSupervisorFer && onOpenAddCleaner && (
             <button
               type="button"
               onClick={onOpenAddCleaner}
@@ -1707,7 +1742,7 @@ export default function PayrollView({
               <div className="bg-[#0B1D4A] text-white p-5 sm:p-6 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <span className="text-xs text-slate-300 uppercase tracking-wider font-semibold block">
-                    Monto Total de Nómina ({activeCleanersCount} cleaners con turnos)
+                    {isSupervisorFer ? 'Nómina de María' : `Monto Total de Nómina (${activeCleanersCount} cleaners con turnos)`}
                   </span>
                   <span className="text-3xl sm:text-4xl font-bold font-serif text-[#FFB566] tabular-nums mt-1 block">
                     ${totalPayroll.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} CAD
@@ -1726,7 +1761,7 @@ export default function PayrollView({
                       ${totalPendientesAmount.toFixed(2)} CAD
                     </span>
                     <span className="text-[10px] text-slate-400 block">
-                      ({totalPendientesCount} cleaners)
+                      ({totalPendientesCount} {totalPendientesCount === 1 ? 'cleaner' : 'cleaners'})
                     </span>
                   </div>
 
@@ -1738,7 +1773,7 @@ export default function PayrollView({
                       ${totalPagadosAmount.toFixed(2)} CAD
                     </span>
                     <span className="text-[10px] text-slate-400 block">
-                      ({totalPagadosCount} cleaners)
+                      ({totalPagadosCount} {totalPagadosCount === 1 ? 'cleaner' : 'cleaners'})
                     </span>
                   </div>
 
@@ -1747,10 +1782,12 @@ export default function PayrollView({
                     <span className="text-base font-bold text-white tabular-nums">{totalPayrollHours.toFixed(1)} hrs</span>
                   </div>
 
-                  <div>
-                    <span className="text-slate-400 block font-medium">Pago a Teams</span>
-                    <span className="text-base font-bold text-sky-300 tabular-nums">${totalTeamPayroll.toFixed(2)} CAD</span>
-                  </div>
+                  {!isSupervisorFer && (
+                    <div>
+                      <span className="text-slate-400 block font-medium">Pago a Teams</span>
+                      <span className="text-base font-bold text-sky-300 tabular-nums">${totalTeamPayroll.toFixed(2)} CAD</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2024,8 +2061,8 @@ export default function PayrollView({
                 onChange={(e) => setHistoryCleanerFilter(e.target.value)}
                 className="px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
               >
-                <option value="all">Todos los cleaners</option>
-                {cleaners.map((c) => (
+                <option value="all">{isSupervisorFer ? 'María' : 'Todos los cleaners'}</option>
+                {!isSupervisorFer && effectiveCleaners.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>

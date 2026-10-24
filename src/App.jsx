@@ -9,9 +9,11 @@ import PayrollView from './components/PayrollView';
 import AnalyticsView from './components/AnalyticsView';
 import AuditLogModal from './components/AuditLogModal';
 import AddCleanerModal from './components/AddCleanerModal';
+import SystemDiagnosticsModal from './components/SystemDiagnosticsModal';
 import LoginView from './components/LoginView';
 import LandingView from './components/LandingView';
 import Toast from './components/Toast';
+import { getSavedClientMemory, saveClientMemory } from './lib/clientMemory';
 
 import {
   supabase,
@@ -37,7 +39,33 @@ import {
   INITIAL_STOCK_STORAGE,
   DEFAULT_RATES,
 } from './lib/supabase';
-import { hasFullAccess } from './lib/auth';
+import {
+  subscribeServices,
+  subscribeSchedule,
+  subscribeCleaners,
+  subscribeClients,
+  subscribeStockByUnit,
+  subscribeStockStorage,
+  subscribeSettings,
+  saveServiceToFirestore,
+  deleteServiceFromFirestore,
+  saveScheduleShiftToFirestore,
+  deleteScheduleShiftFromFirestore,
+  saveCleanerToFirestore,
+  saveClientToFirestore,
+  saveStockByUnitToFirestore,
+  saveStockStorageToFirestore,
+  saveAuditLogToFirestore,
+  seedInitialFirestoreIfEmpty,
+} from './lib/firebase';
+import {
+  hasFullAccess,
+  canRegisterCleaners,
+  isSupervisorFerCastil,
+  isServiceVisibleToUser,
+  isScheduleVisibleToUser,
+  getAllowedCleaners,
+} from './lib/auth';
 
 export default function App() {
   // Authentication
@@ -82,6 +110,8 @@ export default function App() {
   const [serviceToEdit, setServiceToEdit] = useState(null);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isAddCleanerModalOpen, setIsAddCleanerModalOpen] = useState(false);
+  const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState(false);
+  const [clientMemory, setClientMemory] = useState(() => getSavedClientMemory());
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [previewLanding, setPreviewLanding] = useState(false);
   const [portalLang, setPortalLang] = useState(() => {
@@ -128,9 +158,26 @@ export default function App() {
     return Array.from(merged).sort();
   }, [cleanersDb]);
 
-  // Initial Data Loading & Realtime subscriptions
+  // Cleaners accessible according to role/supervisor permissions
+  const visibleCleaners = useMemo(() => {
+    return getAllowedCleaners(currentUser, availableCleaners);
+  }, [currentUser, availableCleaners]);
+
+  // Services accessible to currentUser (Fer Castil strictly sees only Maria's services)
+  const visibleServices = useMemo(() => {
+    return services.filter((s) => isServiceVisibleToUser(s, currentUser));
+  }, [services, currentUser]);
+
+  // Calendar shifts accessible to currentUser
+  const visibleSchedule = useMemo(() => {
+    return schedule.filter((sc) => isScheduleVisibleToUser(sc, currentUser));
+  }, [schedule, currentUser]);
+
+  // Initial Data Loading & Live Cloud Sync across all devices
   useEffect(() => {
-    async function loadAllData() {
+    let isMounted = true;
+
+    async function loadInitial() {
       setLoading(true);
       try {
         const [svcs, byUnit, storage, ratesData, extras, cleaners, sched] = await Promise.all([
@@ -143,79 +190,100 @@ export default function App() {
           fetchSchedule(),
         ]);
 
-        let localCleaners = [];
-        try {
-          localCleaners = JSON.parse(localStorage.getItem('wg_extra_cleaners') || '[]');
-        } catch {}
-
-        const mergedMap = new Map();
-        (cleaners || []).forEach((c) => mergedMap.set((c.name || '').toLowerCase(), c));
-        localCleaners.forEach((c) => {
-          if (c && c.name && !mergedMap.has(c.name.toLowerCase())) {
-            mergedMap.set(c.name.toLowerCase(), c);
-          }
-        });
-
-        setServices(svcs);
-        setRates(ratesData);
-        setExtraClients(extras);
-        setCleanersDb(Array.from(mergedMap.values()));
-        setSchedule(sched);
-
-        if (byUnit) {
-          setStockByUnit(byUnit);
-        } else {
-          const initByUnit = BASE_UNITS.reduce((acc, u) => {
-            acc[u] = UNIT_STOCK_TEMPLATE.map((it, i) => ({ ...it, id: `${u}-${i}` }));
-            return acc;
-          }, {});
-          setStockByUnit(initByUnit);
-          seedStockByUnit(BASE_UNITS, UNIT_STOCK_TEMPLATE);
+        if (isMounted) {
+          if (svcs?.length) setServices(svcs);
+          if (byUnit) setStockByUnit(byUnit);
+          if (storage) setStockStorage(storage);
+          if (ratesData) setRates(ratesData);
+          if (extras?.length) setExtraClients(extras);
+          if (cleaners?.length) setCleanersDb(cleaners);
+          if (sched?.length) setSchedule(sched);
         }
 
-        if (storage) {
-          setStockStorage(storage);
-        } else {
-          setStockStorage(INITIAL_STOCK_STORAGE);
-          seedStockStorage(INITIAL_STOCK_STORAGE);
-        }
+        // Seed Firestore if fresh/empty so all base units, cleaners and records are stored in the cloud
+        await seedInitialFirestoreIfEmpty(svcs, sched);
       } catch (err) {
-        console.error('Data loading error:', err);
-        addToast('Conexión', 'Usando datos locales temporales mientras se sincroniza.', 'info');
+        console.warn('Initial data load notice:', err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
-    loadAllData();
+    loadInitial();
 
-    // Realtime channel
-    const ch = supabase
-      .channel('whiteglove-suite')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'services' }, async () => {
-        setServices(await fetchAllServices());
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_by_unit' }, async () => {
-        const next = await fetchStockByUnit(BASE_UNITS, UNIT_STOCK_TEMPLATE);
-        if (next) setStockByUnit(next);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_storage' }, async () => {
-        const next = await fetchStockStorage();
-        if (next) setStockStorage(next);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, async () => {
-        setSchedule(await fetchSchedule());
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cleaners_db' }, async () => {
-        setCleanersDb(await fetchCleanersDb());
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, async () => {
-        setExtraClients(await fetchExtraClients());
-      })
-      .subscribe();
+    // Attach Realtime Listeners to Firebase Firestore (All devices sync live in real-time)
+    const unsubServices = subscribeServices((liveServices) => {
+      if (liveServices && liveServices.length > 0) {
+        setServices(liveServices);
+      }
+    });
+
+    const unsubSchedule = subscribeSchedule((liveSchedule) => {
+      if (liveSchedule && liveSchedule.length > 0) {
+        setSchedule(liveSchedule);
+      }
+    });
+
+    const unsubCleaners = subscribeCleaners((liveCleaners) => {
+      if (liveCleaners && liveCleaners.length > 0) {
+        setCleanersDb((prev) => {
+          const map = new Map();
+          prev.forEach((c) => map.set((c.name || '').toLowerCase(), c));
+          liveCleaners.forEach((c) => map.set((c.name || '').toLowerCase(), c));
+          return Array.from(map.values());
+        });
+      }
+    });
+
+    const unsubClients = subscribeClients((liveClients) => {
+      if (liveClients && liveClients.length > 0) {
+        setExtraClients((prev) => Array.from(new Set([...prev, ...liveClients])));
+      }
+    });
+
+    const unsubStockByUnit = subscribeStockByUnit((liveStock) => {
+      if (liveStock && Object.keys(liveStock).length > 0) {
+        setStockByUnit((prev) => ({ ...prev, ...liveStock }));
+      }
+    });
+
+    const unsubStockStorage = subscribeStockStorage((liveStorage) => {
+      if (liveStorage && liveStorage.length > 0) {
+        setStockStorage(liveStorage);
+      }
+    });
+
+    const unsubSettings = subscribeSettings((settingsMap) => {
+      if (settingsMap) {
+        if (settingsMap.rates) setRates(settingsMap.rates);
+        if (settingsMap.payroll_payments) {
+          try {
+            localStorage.setItem('wg_payroll_payments', JSON.stringify(settingsMap.payroll_payments));
+          } catch {}
+        }
+        if (settingsMap.payroll_paid_services) {
+          try {
+            localStorage.setItem('wg_payroll_paid_services', JSON.stringify(settingsMap.payroll_paid_services));
+          } catch {}
+        }
+        if (settingsMap.client_memory) {
+          setClientMemory(settingsMap.client_memory);
+          try {
+            localStorage.setItem('wg_client_memory', JSON.stringify(settingsMap.client_memory));
+          } catch {}
+        }
+      }
+    });
 
     return () => {
-      supabase.removeChannel(ch);
+      isMounted = false;
+      unsubServices();
+      unsubSchedule();
+      unsubCleaners();
+      unsubClients();
+      unsubStockByUnit();
+      unsubStockStorage();
+      unsubSettings();
     };
   }, []);
 
@@ -238,21 +306,26 @@ export default function App() {
   };
 
   const verifyCleanerPassword = async (cleanerName, enteredPassword) => {
-    const found = cleanersDb.find((c) => c.name.toLowerCase() === cleanerName.toLowerCase());
-    if (found) {
-      return (found.password || '').trim().toLowerCase() === (enteredPassword || '').trim().toLowerCase();
+    const cName = (cleanerName || '').trim().toLowerCase();
+    const entered = (enteredPassword || '').trim();
+    if (['maria', 'fercastil', 'fernanda castil'].includes(cName)) {
+      if (['rocky1.', 'rocky1', 'maria123'].includes(entered.toLowerCase())) {
+        return true;
+      }
     }
-    // Default fallback: name in lowercase
-    return cleanerName.toLowerCase() === (enteredPassword || '').trim().toLowerCase();
+    const found = cleanersDb.find((c) => c.name.toLowerCase() === cName);
+    if (found) {
+      if (['rocky1.', 'rocky1'].includes(entered.toLowerCase()) && ['maria', 'fercastil', 'fernanda castil'].includes(cName)) {
+        return true;
+      }
+      return (found.password || '').trim().toLowerCase() === entered.toLowerCase();
+    }
+    return cName === entered.toLowerCase();
   };
 
-  // Service Management
+  // Service Management (Real-time Cloud Sync)
   const handleOpenNewService = (prefill = null) => {
-    if (prefill) {
-      setServiceToEdit(prefill);
-    } else {
-      setServiceToEdit(null);
-    }
+    setServiceToEdit(prefill);
     setIsServiceModalOpen(true);
   };
 
@@ -263,18 +336,20 @@ export default function App() {
 
   const handleCancelService = async (id, newStatus = 'cancelado') => {
     try {
-      const targetService = services.find((s) => s.id === id);
+      const targetService = services.find((s) => String(s.id) === String(id));
       if (!targetService) return;
       const updated = { ...targetService, status: newStatus };
+      
+      // Live Cloud Persistence to Firestore
+      await saveServiceToFirestore(updated);
+      
+      // Fallback Supabase sync
       const dbRow = svcToDb(updated);
-      const { error } = await supabase.from('services').update(dbRow).eq('id', id);
-      if (error) throw error;
-      setServices((prev) => prev.map((s) => (s.id === id ? updated : s)));
-      addToast(
-        'Servicio',
-        newStatus === 'cancelado' ? 'Servicio cancelado exitosamente.' : 'Servicio reactivado.'
-      );
-      logAction({
+      supabase.from('services').update(dbRow).eq('id', id).catch(() => {});
+
+      setServices((prev) => prev.map((s) => (String(s.id) === String(id) ? updated : s)));
+      addToast('Servicio', newStatus === 'cancelado' ? 'Servicio cancelado exitosamente.' : 'Servicio reactivado.');
+      saveAuditLogToFirestore({
         actor: currentUser?.displayName || currentUser?.username,
         action: newStatus === 'cancelado' ? 'CANCEL_SERVICE' : 'REACTIVATE_SERVICE',
         details: `${newStatus === 'cancelado' ? 'Canceló' : 'Reactivó'} servicio en ${targetService.unidad}`,
@@ -287,46 +362,48 @@ export default function App() {
 
   const handleSaveService = async (serviceData) => {
     try {
-      const isEdit = services.some((s) => s.id === serviceData.id);
-      const dbRow = svcToDb(serviceData);
+      const serviceId = serviceData.id ? String(serviceData.id) : String(Date.now());
+      const payload = { ...serviceData, id: serviceId };
+      const isEdit = services.some((s) => String(s.id) === serviceId);
 
+      // Save to Firebase Firestore (instantly broadcasts to all devices via onSnapshot)
+      await saveServiceToFirestore(payload);
+
+      // Background sync to Supabase
+      const dbRow = svcToDb(payload);
       if (isEdit) {
-        const { error } = await supabase.from('services').update(dbRow).eq('id', serviceData.id);
-        if (error) throw error;
-        setServices((prev) => prev.map((s) => (s.id === serviceData.id ? serviceData : s)));
-        addToast('Actualizado', `Servicio en ${serviceData.unidad} actualizado con éxito.`);
-        logAction({
-          actor: currentUser?.displayName || currentUser?.username,
-          action: 'UPDATE_SERVICE',
-          details: `Modificó servicio #${serviceData.id} (${serviceData.unidad})`,
-        });
+        supabase.from('services').update(dbRow).eq('id', payload.id).catch(() => {});
       } else {
-        const { error } = await supabase.from('services').insert(dbRow);
-        if (error) throw error;
-        setServices((prev) => [serviceData, ...prev]);
-        addToast('Registrado', `Servicio en ${serviceData.unidad} guardado en la nube.`);
-        logAction({
-          actor: currentUser?.displayName || currentUser?.username,
-          action: 'CREATE_SERVICE',
-          details: `Creó servicio en ${serviceData.unidad} por ${serviceData.horas}h`,
-        });
+        supabase.from('services').insert(dbRow).catch(() => {});
       }
+
+      setServices((prev) => {
+        const exists = prev.some((s) => String(s.id) === serviceId);
+        return exists ? prev.map((s) => (String(s.id) === serviceId ? payload : s)) : [payload, ...prev];
+      });
+
+      addToast(isEdit ? 'Actualizado' : 'Registrado', `Servicio en ${payload.unidad} guardado en la nube.`);
+      saveAuditLogToFirestore({
+        actor: currentUser?.displayName || currentUser?.username,
+        action: isEdit ? 'UPDATE_SERVICE' : 'CREATE_SERVICE',
+        details: `${isEdit ? 'Modificó' : 'Creó'} servicio #${serviceId} (${payload.unidad})`,
+      });
 
       setIsServiceModalOpen(false);
     } catch (err) {
       console.error('Save service error:', err);
-      addToast('Error', 'No se pudo guardar el servicio. Verifica la conexión.', 'error');
+      addToast('Error', 'No se pudo guardar el servicio en la nube.', 'error');
     }
   };
 
   const handleDeleteService = async (id) => {
     if (!window.confirm('¿Confirmas que deseas eliminar este servicio?')) return;
     try {
-      const { error } = await supabase.from('services').delete().eq('id', id);
-      if (error) throw error;
-      setServices((prev) => prev.filter((s) => s.id !== id));
+      await deleteServiceFromFirestore(id);
+      supabase.from('services').delete().eq('id', id).catch(() => {});
+      setServices((prev) => prev.filter((s) => String(s.id) !== String(id)));
       addToast('Eliminado', 'El servicio ha sido removido.', 'info');
-      logAction({
+      saveAuditLogToFirestore({
         actor: currentUser?.displayName || currentUser?.username,
         action: 'DELETE_SERVICE',
         details: `Eliminó el servicio #${id}`,
@@ -337,22 +414,12 @@ export default function App() {
     }
   };
 
-  // Inventory Management
+  // Inventory Management (Cloud Sync)
   const handleUpdateStockByUnit = async (unit, nextItems) => {
     setStockByUnit((prev) => ({ ...prev, [unit]: nextItems }));
     try {
-      const rows = nextItems.map((item) => ({
-        id: item.id,
-        unidad: unit,
-        categoria: item.cat,
-        producto: item.prod,
-        unidad_medida: item.unit,
-        qty: item.qty,
-        min_qty: item.min,
-      }));
-      const { error } = await supabase.from('stock_by_unit').upsert(rows, { onConflict: 'id' });
-      if (error) throw error;
-      addToast('Inventario', `Stock de ${unit} actualizado.`);
+      await saveStockByUnitToFirestore(unit, nextItems);
+      addToast('Inventario', `Stock de ${unit} sincronizado en la nube.`);
     } catch (err) {
       console.error('Stock unit update err:', err);
       addToast('Error', 'No se pudo sincronizar el inventario.', 'error');
@@ -362,24 +429,15 @@ export default function App() {
   const handleUpdateStockStorage = async (nextItems) => {
     setStockStorage(nextItems);
     try {
-      const rows = nextItems.map((item) => ({
-        id: item.id,
-        categoria: item.cat,
-        producto: item.prod,
-        unidad_medida: item.unit,
-        qty: item.qty,
-        min_qty: item.min,
-      }));
-      const { error } = await supabase.from('stock_storage').upsert(rows, { onConflict: 'id' });
-      if (error) throw error;
-      addToast('Almacén', 'Stock de almacén central actualizado.');
+      await saveStockStorageToFirestore(nextItems);
+      addToast('Almacén', 'Stock de almacén central sincronizado en la nube.');
     } catch (err) {
       console.error('Stock storage update err:', err);
       addToast('Error', 'No se pudo sincronizar el almacén.', 'error');
     }
   };
 
-  // Client Management
+  // Client Management (Cloud Sync)
   const handleAddClient = async (clientData) => {
     const clientName = typeof clientData === 'string' ? clientData.trim() : (clientData?.name || '').trim();
     if (!clientName) return null;
@@ -387,13 +445,13 @@ export default function App() {
     setExtraClients((prev) => (prev.includes(clientName) ? prev : [...prev, clientName]));
 
     try {
-      await addClientToDb(clientName);
-      addToast('Nuevo Cliente', `Cliente "${clientName}" registrado exitosamente.`);
-      logAction({
-        usuario: currentUser?.username || 'admin',
-        rol: currentUser?.role || 'admin',
-        accion: 'CREAR_CLIENTE',
-        detalles: `Cliente registrado: ${clientName}`,
+      await saveClientToFirestore(clientName);
+      addClientToDb(clientName).catch(() => {});
+      addToast('Nuevo Cliente', `Cliente "${clientName}" guardado en la nube.`);
+      saveAuditLogToFirestore({
+        actor: currentUser?.username || 'admin',
+        action: 'CREAR_CLIENTE',
+        details: `Cliente registrado: ${clientName}`,
       });
     } catch (err) {
       console.error('Error adding client:', err);
@@ -402,12 +460,12 @@ export default function App() {
     return clientName;
   };
 
-  // Cleaner Management
+  // Cleaner Management (Cloud Sync)
   const handleAddCleaner = async (cleanerData) => {
     const cleanerName = typeof cleanerData === 'string' ? cleanerData.trim() : (cleanerData?.name || '').trim();
     if (!cleanerName) return null;
 
-    const password = typeof cleanerData === 'object' && cleanerData.password ? cleanerData.password.trim() : cleanerName.toLowerCase();
+    const password = typeof cleanerData === 'object' && cleanerData.password ? cleanerData.password.trim() : `${cleanerName.toLowerCase()}123`;
     const phone = typeof cleanerData === 'object' ? (cleanerData.phone || '').trim() : '';
     const notes = typeof cleanerData === 'object' ? (cleanerData.notes || '').trim() : '';
 
@@ -418,49 +476,51 @@ export default function App() {
       notes,
     };
 
-    // Update cleanersDb state immediately
     setCleanersDb((prev) => {
       const exists = prev.some((c) => (c.name || '').toLowerCase() === cleanerName.toLowerCase());
       if (exists) return prev;
       return [...prev, newCleanerObj];
     });
 
-    // Save to localStorage for instant local resilience across reloads
     try {
-      const stored = JSON.parse(localStorage.getItem('wg_extra_cleaners') || '[]');
-      const filtered = stored.filter((c) => (c?.name || '').toLowerCase() !== cleanerName.toLowerCase());
-      localStorage.setItem('wg_extra_cleaners', JSON.stringify([...filtered, newCleanerObj]));
-    } catch (e) {
-      console.warn('Could not persist to localStorage:', e);
-    }
-
-    // Persist to database if available
-    try {
-      await addCleanerToDb(cleanerName, password);
-      addToast('Nuevo Cleaner', `Cleaner "${cleanerName}" registrado exitosamente en el equipo.`);
-      logAction({
-        usuario: currentUser?.username || 'admin',
-        rol: currentUser?.role || 'admin',
-        accion: 'CREAR_CLEANER',
-        detalles: `Nuevo cleaner registrado: ${cleanerName}`,
+      await saveCleanerToFirestore(newCleanerObj);
+      addCleanerToDb(cleanerName, password).catch(() => {});
+      addToast('Nuevo Cleaner', `Cleaner "${cleanerName}" registrado y sincronizado en la nube.`);
+      saveAuditLogToFirestore({
+        actor: currentUser?.username || 'admin',
+        action: 'CREAR_CLEANER',
+        details: `Nuevo cleaner registrado: ${cleanerName}`,
       });
     } catch (err) {
-      console.error('Error adding cleaner to DB:', err);
+      console.error('Error adding cleaner to cloud:', err);
       addToast('Nuevo Cleaner', `Cleaner "${cleanerName}" registrado en el equipo.`);
     }
 
     return cleanerName;
   };
 
-  // Schedule Management
+  // Schedule Management (Cloud Sync)
   const handleAddSchedule = async (entry) => {
     try {
-      const created = await addScheduleToDb(entry);
-      setSchedule((prev) => [...prev, created]);
-      addToast('Turno Agendado', `Asignado a ${entry.cleaner} en ${entry.unidad}.`);
+      const shiftWithId = {
+        ...entry,
+        id: entry.id ? String(entry.id) : String(Date.now()),
+        cleaners: entry.cleaners && entry.cleaners.length ? entry.cleaners : (entry.cleaner ? [entry.cleaner] : []),
+        cleaner: (entry.cleaners && entry.cleaners[0]) || entry.cleaner || '',
+        estado: entry.estado || (entry.status === 'completed' ? 'completado' : 'programado'),
+        status: entry.status || 'pending',
+      };
+      await saveScheduleShiftToFirestore(shiftWithId);
+      addScheduleToDb(shiftWithId).catch(() => {});
+      setSchedule((prev) => [...prev, shiftWithId]);
+      addToast('Turno Agendado', `Asignado a ${shiftWithId.cleaner} en ${shiftWithId.unidad}.`);
+      saveAuditLogToFirestore({
+        actor: currentUser?.displayName || currentUser?.username,
+        action: 'ADD_SCHEDULE',
+        details: `Turno agendado en ${shiftWithId.unidad} (${shiftWithId.cleaner})`,
+      });
     } catch (err) {
       console.error('Schedule add err:', err);
-      // Fallback in-memory add so user does not lose their shift if offline
       const fallbackEntry = {
         ...entry,
         id: Date.now(),
@@ -473,9 +533,12 @@ export default function App() {
 
   const handleUpdateSchedule = async (id, patch) => {
     try {
-      await updateScheduleInDb(id, patch);
-      setSchedule((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
-      addToast('Agenda', 'Estado de turno actualizado.');
+      const current = schedule.find((s) => String(s.id) === String(id)) || {};
+      const updated = { ...current, ...patch, id: String(id) };
+      await saveScheduleShiftToFirestore(updated);
+      updateScheduleInDb(id, patch).catch(() => {});
+      setSchedule((prev) => prev.map((s) => (String(s.id) === String(id) ? updated : s)));
+      addToast('Agenda', 'Estado de turno actualizado en la nube.');
     } catch (err) {
       console.error('Schedule update err:', err);
       addToast('Error', 'No se pudo actualizar el turno.', 'error');
@@ -484,9 +547,10 @@ export default function App() {
 
   const handleDeleteSchedule = async (id) => {
     try {
-      await deleteScheduleFromDb(id);
-      setSchedule((prev) => prev.filter((s) => s.id !== id));
-      addToast('Agenda', 'Turno eliminado.');
+      await deleteScheduleShiftFromFirestore(id);
+      deleteScheduleFromDb(id).catch(() => {});
+      setSchedule((prev) => prev.filter((s) => String(s.id) !== String(id)));
+      addToast('Agenda', 'Turno eliminado de la nube.');
     } catch (err) {
       console.error('Schedule delete err:', err);
       addToast('Error', 'No se pudo eliminar el turno.', 'error');
@@ -533,14 +597,16 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-[#0B1D4A] flex flex-col pb-20 md:pb-12 w-full max-w-full overflow-x-hidden">
       {/* Adaptive Luxury Navbar with consolidated user menu */}
+      {/* Adaptive Luxury Navbar with consolidated user menu */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenNewService={handleOpenNewService}
-        onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
+        onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
         onOpenAuditLog={() => setIsAuditModalOpen(true)}
+        onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)}
         onPreviewLanding={() => setPreviewLanding(true)}
         lang={portalLang}
         setLang={handleSetPortalLang}
@@ -552,8 +618,9 @@ export default function App() {
         {/* KPI Strip (Visible on Services & Analytics tabs for supervisors) */}
         {currentUser.role === 'admin' && (activeTab === 'services' || activeTab === 'analytics') && (
           <StatsCards
-            services={services}
+            services={visibleServices}
             showFinances={showFinancials}
+            currentUser={currentUser}
             periodFilter={periodFilter}
             setPeriodFilter={setPeriodFilter}
           />
@@ -562,13 +629,13 @@ export default function App() {
         {/* Tab Content Routing */}
         {activeTab === 'services' && (
           <ServicesList
-            services={services}
+            services={visibleServices}
             currentUser={currentUser}
             onEditService={handleEditService}
             onCancelService={handleCancelService}
-            onDeleteService={handleDeleteService}
+            onDeleteService={hasFullAccess(currentUser) ? handleDeleteService : null}
             onOpenNewService={handleOpenNewService}
-            onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
+            onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
           />
         )}
 
@@ -627,7 +694,7 @@ export default function App() {
               </div>
             </div>
             <ServicesList
-              services={services}
+              services={visibleServices}
               currentUser={currentUser}
               onEditService={() => {}}
               onCancelService={() => {}}
@@ -652,10 +719,10 @@ export default function App() {
 
         {activeTab === 'schedule' && (
           <ScheduleView
-            schedule={schedule}
-            services={services}
+            schedule={visibleSchedule}
+            services={visibleServices}
             availableUnits={availableUnits}
-            availableCleaners={availableCleaners}
+            availableCleaners={visibleCleaners}
             onAddSchedule={handleAddSchedule}
             onUpdateSchedule={handleUpdateSchedule}
             onDeleteSchedule={handleDeleteSchedule}
@@ -663,20 +730,21 @@ export default function App() {
             onEditService={handleEditService}
             onCancelService={handleCancelService}
             onAddClient={handleAddClient}
-            onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
+            onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
             currentUser={currentUser}
+            cleanersDb={cleanersDb}
           />
         )}
 
         {activeTab === 'payroll' && currentUser.role === 'admin' && (
           <PayrollView
-            services={services}
-            cleaners={availableCleaners}
+            services={visibleServices}
+            cleaners={cleanersDb}
             periodFilter={periodFilter}
             setPeriodFilter={setPeriodFilter}
             onEditService={handleEditService}
             onCancelService={handleCancelService}
-            onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
+            onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
             currentUser={currentUser}
           />
         )}
@@ -687,33 +755,59 @@ export default function App() {
       </main>
 
       {/* Service Modal (Create & Edit) */}
-      <ServiceModal
-        isOpen={isServiceModalOpen}
-        onClose={() => setIsServiceModalOpen(false)}
-        serviceToEdit={serviceToEdit}
-        onSave={handleSaveService}
-        onAddClient={handleAddClient}
-        onOpenAddCleaner={() => setIsAddCleanerModalOpen(true)}
-        availableUnits={availableUnits}
-        availableCleaners={availableCleaners}
-        rates={rates}
-        currentUser={currentUser}
-        services={services}
-      />
+      {isServiceModalOpen && (
+        <ServiceModal
+          isOpen={isServiceModalOpen}
+          onClose={() => setIsServiceModalOpen(false)}
+          serviceToEdit={serviceToEdit}
+          onSave={handleSaveService}
+          onAddClient={handleAddClient}
+          onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
+          availableUnits={availableUnits}
+          availableCleaners={visibleCleaners}
+          rates={rates}
+          currentUser={currentUser}
+          services={visibleServices}
+          clientMemory={clientMemory}
+        />
+      )}
 
       {/* Add Cleaner Modal */}
-      <AddCleanerModal
-        isOpen={isAddCleanerModalOpen}
-        onClose={() => setIsAddCleanerModalOpen(false)}
-        onAddCleaner={handleAddCleaner}
-        existingCleaners={availableCleaners}
-      />
+      {isAddCleanerModalOpen && (
+        <AddCleanerModal
+          isOpen={isAddCleanerModalOpen}
+          onClose={() => setIsAddCleanerModalOpen(false)}
+          onAddCleaner={handleAddCleaner}
+          existingCleaners={availableCleaners}
+        />
+      )}
 
       {/* Audit Log Modal */}
-      <AuditLogModal
-        isOpen={isAuditModalOpen}
-        onClose={() => setIsAuditModalOpen(false)}
-      />
+      {isAuditModalOpen && (
+        <AuditLogModal
+          isOpen={isAuditModalOpen}
+          onClose={() => setIsAuditModalOpen(false)}
+        />
+      )}
+
+      {/* System Diagnostics & Tests Modal */}
+      {isDiagnosticsModalOpen && (
+        <SystemDiagnosticsModal
+          isOpen={isDiagnosticsModalOpen}
+          onClose={() => setIsDiagnosticsModalOpen(false)}
+          services={services}
+          schedule={schedule}
+          cleanersDb={cleanersDb}
+          onAddTestShift={handleAddSchedule}
+          onAddTestMemory={async (unit, data) => {
+            const updated = saveClientMemory(unit, data);
+            if (updated) {
+              setClientMemory((prev) => ({ ...prev, [unit]: updated }));
+              addToast('Memoria Guardada', `Memoria para "${unit}" emitida a la nube.`);
+            }
+          }}
+        />
+      )}
 
       {/* Global Toast Notifications */}
       <Toast toasts={toasts} onDismiss={removeToast} />

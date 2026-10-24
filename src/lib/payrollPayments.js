@@ -35,6 +35,7 @@ export function getPayrollPayments() {
 }
 
 import { fetchPayrollSetting, savePayrollSetting } from './supabase';
+import { saveSettingToFirestore } from './firebase';
 
 /**
  * Save payments dictionary to localStorage and cloud
@@ -42,8 +43,8 @@ import { fetchPayrollSetting, savePayrollSetting } from './supabase';
 export function savePayrollPayments(records) {
   try {
     localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(records));
-    // Asynchronous background sync to Supabase settings table
     savePayrollSetting('payroll_payments', records).catch(() => {});
+    saveSettingToFirestore('payroll_payments', records).catch(() => {});
   } catch (err) {
     console.error('Error saving payroll payments:', err);
   }
@@ -68,8 +69,8 @@ export function getPaidServices() {
 export function savePaidServices(records) {
   try {
     localStorage.setItem(PAID_SERVICES_STORAGE_KEY, JSON.stringify(records));
-    // Asynchronous background sync to Supabase settings table
     savePayrollSetting('payroll_paid_services', records).catch(() => {});
+    saveSettingToFirestore('payroll_paid_services', records).catch(() => {});
   } catch (err) {
     console.error('Error saving paid services:', err);
   }

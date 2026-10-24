@@ -25,9 +25,11 @@ export function getSavedClientMemory() {
   }
 }
 
+import { saveSettingToFirestore } from './firebase';
+
 /**
  * Save or update memory for a specific client or unit.
- * Automatically persists to localStorage so it is remembered across all sessions.
+ * Automatically persists to localStorage and Firestore so it is remembered across all devices.
  */
 export function saveClientMemory(unitName, data = {}) {
   if (!unitName || typeof unitName !== 'string') return null;
@@ -46,6 +48,7 @@ export function saveClientMemory(unitName, data = {}) {
       },
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    saveSettingToFirestore('client_memory', updated).catch(() => {});
     return updated[trimmed];
   } catch (err) {
     console.error('Error saving client memory to localStorage:', err);
@@ -60,13 +63,16 @@ export function saveClientMemory(unitName, data = {}) {
  * 2. Historical services (most recent non-cancelled service for this unit with cobro > 0)
  * 3. Standard built-in presets (e.g. Mohammed: 220, Phillys: 180)
  */
-export function resolveClientMemory(unitName, services = []) {
+export function resolveClientMemory(unitName, services = [], liveMemory = null) {
   if (!unitName || typeof unitName !== 'string') return null;
   const trimmed = unitName.trim();
   const lower = trimmed.toLowerCase();
 
-  // 1. Search in saved localStorage memory
-  const saved = getSavedClientMemory();
+  // 1. Search in live memory (if passed from React state) or saved localStorage memory
+  const saved = (liveMemory && typeof liveMemory === 'object' && Object.keys(liveMemory).length > 0)
+    ? liveMemory
+    : getSavedClientMemory();
+
   let localData = saved[trimmed] || null;
   if (!localData) {
     const foundKey = Object.keys(saved).find((k) => k.trim().toLowerCase() === lower);

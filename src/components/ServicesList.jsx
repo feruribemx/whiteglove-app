@@ -4,7 +4,7 @@ import {
   Sparkles, Ban, RotateCcw, CheckCircle2, Building2, Calendar, BookOpen, X, Filter, Copy,
   MoreVertical, UserPlus
 } from 'lucide-react';
-import { hasFullAccess, canManagePagos } from '../lib/auth';
+import { hasFullAccess, canManagePagos, isMariaOrFerCastil, isMaferCleaner } from '../lib/auth';
 import { exportServicesToCSV } from '../lib/export';
 
 // Helper to format decimal hours into hours & minutes
@@ -69,6 +69,9 @@ export default function ServicesList({
 
   const showFinancials = hasFullAccess(currentUser);
   const canEdit = canManagePagos(currentUser);
+  const isSupervisorFer = Boolean(
+    currentUser && (currentUser.username || '').toLowerCase() === 'fercastil'
+  );
   const isCleaner = Boolean(
     currentUser && (
       (currentUser.role || '').toLowerCase() === 'cleaner' ||
@@ -83,7 +86,9 @@ export default function ServicesList({
     (s.cleaners || []).forEach((c) => allCleanersSet.add(c));
     if (s.cleaner) allCleanersSet.add(s.cleaner);
   });
-  const cleanersList = Array.from(allCleanersSet).sort();
+  const cleanersList = isSupervisorFer
+    ? ['Maria']
+    : Array.from(allCleanersSet).sort();
 
   // Count services per client to identify recurring clients
   const clientServiceCounts = React.useMemo(() => {
@@ -99,24 +104,45 @@ export default function ServicesList({
 
   // Filter logic
   const filteredServices = services.filter((s) => {
+    // If Fer Castil, strictly and exclusively show her services (MARIA = FER CASTIL)
+    if (isSupervisorFer) {
+      const svcCleaners = s.cleaners?.length ? s.cleaners : (s.cleaner ? [s.cleaner] : []);
+      const matchesMariaOrFer =
+        svcCleaners.some(isMariaOrFerCastil) ||
+        (s.cleaner && isMariaOrFerCastil(s.cleaner)) ||
+        (s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).some(isMariaOrFerCastil)) ||
+        (s.ratesPorCleaner && Object.keys(s.ratesPorCleaner).some(isMariaOrFerCastil)) ||
+        (s.capturista && !isMaferCleaner(s.capturista) && isMariaOrFerCastil(s.capturista));
+      if (!matchesMariaOrFer) return false;
+    }
+
     // If logged in as cleaner, only show services where they participated
     if (isCleaner) {
       const target = cleanerName.toLowerCase();
-      const matchCleanerStr = (str) => {
-        if (!str || typeof str !== 'string') return false;
-        const v = str.trim().toLowerCase();
-        if (v === target) return true;
-        const parts = v.split(/[,/&+yY\s]+/).map(p => p.trim());
-        return parts.includes(target);
-      };
+      if (target === 'mafer') {
+        const isMafer =
+          isMaferCleaner(s.cleaner) ||
+          (Array.isArray(s.cleaners) && s.cleaners.some(isMaferCleaner)) ||
+          (s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).some(isMaferCleaner)) ||
+          (s.ratesPorCleaner && Object.keys(s.ratesPorCleaner).some(isMaferCleaner));
+        if (!isMafer) return false;
+      } else {
+        const matchCleanerStr = (str) => {
+          if (!str || typeof str !== 'string') return false;
+          const v = str.trim().toLowerCase();
+          if (v === target) return true;
+          const parts = v.split(/[,/&+yY\s]+/).map((p) => p.trim());
+          return parts.includes(target);
+        };
 
-      const isMine =
-        matchCleanerStr(s.cleaner) ||
-        (Array.isArray(s.cleaners) && s.cleaners.some((c) => matchCleanerStr(c))) ||
-        (s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).some(matchCleanerStr)) ||
-        (s.ratesPorCleaner && Object.keys(s.ratesPorCleaner).some(matchCleanerStr));
+        const isMine =
+          matchCleanerStr(s.cleaner) ||
+          (Array.isArray(s.cleaners) && s.cleaners.some((c) => matchCleanerStr(c))) ||
+          (s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).some(matchCleanerStr)) ||
+          (s.ratesPorCleaner && Object.keys(s.ratesPorCleaner).some(matchCleanerStr));
 
-      if (!isMine) return false;
+        if (!isMine) return false;
+      }
     }
 
     if (typeFilter !== 'all' && s.tipo !== typeFilter) return false;
@@ -128,8 +154,17 @@ export default function ServicesList({
     }
 
     if (cleanerFilter !== 'all') {
-      const match = (s.cleaners || []).includes(cleanerFilter) || s.cleaner === cleanerFilter;
-      if (!match) return false;
+      const cFilterLow = cleanerFilter.toLowerCase();
+      if (cFilterLow === 'mafer') {
+        const match = isMaferCleaner(s.cleaner) || (s.cleaners || []).some(isMaferCleaner);
+        if (!match) return false;
+      } else if (cFilterLow === 'maria' || cFilterLow.includes('castil')) {
+        const match = isMariaOrFerCastil(s.cleaner) || (s.cleaners || []).some(isMariaOrFerCastil);
+        if (!match) return false;
+      } else {
+        const match = (s.cleaners || []).includes(cleanerFilter) || s.cleaner === cleanerFilter;
+        if (!match) return false;
+      }
     }
 
     // Free Date Range filter
@@ -523,7 +558,7 @@ export default function ServicesList({
                 <th className="px-4 py-3 text-center">Duración</th>
                 {showFinancials && <th className="px-4 py-3 text-right">Cobro Cliente</th>}
                 <th className="px-4 py-3 text-right">Pago Cleaner</th>
-                {!isCleaner && <th className="px-4 py-3 text-right text-sky-900 bg-sky-50/60 font-bold">Pago Team</th>}
+                {showFinancials && <th className="px-4 py-3 text-right text-sky-900 bg-sky-50/60 font-bold">Pago Team</th>}
                 {showFinancials && <th className="px-4 py-3 text-right text-emerald-900 bg-emerald-50/60 font-bold">Utilidad Neta</th>}
                 <th className="px-4 py-3 text-right">Tip</th>
                 <th className="px-4 py-3">Capturista</th>
@@ -637,7 +672,7 @@ export default function ServicesList({
                     </td>
 
                     {/* Pago Team */}
-                    {!isCleaner && (
+                    {showFinancials && (
                       <td className={`px-4 py-3 text-right tabular-nums font-semibold bg-sky-50/20 ${isCancelled ? 'text-slate-400 line-through' : ''}`}>
                         {teamPay > 0 ? (
                           <span className="inline-flex items-center gap-1 font-bold text-sky-800 bg-sky-100/70 px-2 py-0.5 rounded-md border border-sky-300">
