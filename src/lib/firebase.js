@@ -248,18 +248,60 @@ export function subscribeAuditLogs(onUpdate, onError) {
 }
 
 // ==========================================
-// WRITE / UPDATE MUTATIONS
+// WRITE / UPDATE MUTATIONS WITH AUTOMATIC SANITIZATION
 // ==========================================
 
+/**
+ * Recursively cleans payloads before sending to Firestore, eliminating any undefined values
+ * or stray DOM/React properties that cause Firestore setDoc() to reject the write.
+ */
+export function sanitizeFirestoreData(data) {
+  if (data === undefined) return null;
+  if (data === null) return null;
+  if (data instanceof Date) return data.toISOString();
+  if (typeof data !== 'object') {
+    if (typeof data === 'number') {
+      return Number.isNaN(data) ? 0 : data;
+    }
+    return data;
+  }
+  // Remove accidental React SyntheticEvents or DOM elements
+  if (
+    typeof data.preventDefault === 'function' ||
+    'nativeEvent' in data ||
+    '_reactName' in data ||
+    (typeof Element !== 'undefined' && data instanceof Element)
+  ) {
+    return null;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeFirestoreData(item));
+  }
+  const clean = {};
+  for (const [key, val] of Object.entries(data)) {
+    if (key.startsWith('_react') || key.startsWith('__react') || val === undefined) {
+      continue;
+    }
+    const cleaned = sanitizeFirestoreData(val);
+    if (cleaned !== undefined) {
+      clean[key] = cleaned;
+    }
+  }
+  return clean;
+}
+
 export async function saveServiceToFirestore(service) {
-  const serviceId = String(service.id || Date.now());
+  const serviceId = String(service?.id || Date.now());
   const path = `services/${serviceId}`;
   try {
-    const payload = {
+    const raw = {
       ...service,
       id: serviceId,
       updatedAt: new Date().toISOString(),
     };
+    const payload = sanitizeFirestoreData(raw);
     await setDoc(doc(db, 'services', serviceId), payload);
     return payload;
   } catch (error) {
@@ -283,11 +325,12 @@ export async function saveScheduleShiftToFirestore(shift) {
   const shiftId = String(shift.id || Date.now());
   const path = `schedule/${shiftId}`;
   try {
-    const payload = {
+    const raw = {
       ...shift,
       id: shiftId,
       updatedAt: new Date().toISOString(),
     };
+    const payload = sanitizeFirestoreData(raw);
     await setDoc(doc(db, 'schedule', shiftId), payload);
     return payload;
   } catch (error) {
@@ -313,7 +356,7 @@ export async function saveCleanerToFirestore(cleaner) {
   const id = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
   const path = `cleaners/${id}`;
   try {
-    const payload = {
+    const raw = {
       id,
       name,
       password: typeof cleaner === 'object' && cleaner.password ? cleaner.password : name.toLowerCase(),
@@ -321,6 +364,7 @@ export async function saveCleanerToFirestore(cleaner) {
       notes: typeof cleaner === 'object' ? (cleaner.notes || '') : '',
       updatedAt: new Date().toISOString(),
     };
+    const payload = sanitizeFirestoreData(raw);
     await setDoc(doc(db, 'cleaners', id), payload);
     return payload;
   } catch (error) {
@@ -335,11 +379,12 @@ export async function saveClientToFirestore(clientName) {
   const id = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
   const path = `clients/${id}`;
   try {
-    const payload = {
+    const raw = {
       id,
       name,
       createdAt: new Date().toISOString(),
     };
+    const payload = sanitizeFirestoreData(raw);
     await setDoc(doc(db, 'clients', id), payload);
     return payload;
   } catch (error) {
@@ -354,12 +399,13 @@ export async function saveStockByUnitToFirestore(unit, items) {
     await Promise.all(
       items.map((item, idx) => {
         const id = `${unit.toLowerCase().replace(/[^a-z0-9_-]+/g, '_')}_${idx}`;
-        return setDoc(doc(db, 'stock_by_unit', id), {
+        const clean = sanitizeFirestoreData({
           ...item,
           id,
           unidad: unit,
           updatedAt: new Date().toISOString(),
         });
+        return setDoc(doc(db, 'stock_by_unit', id), clean);
       })
     );
   } catch (error) {
@@ -374,11 +420,12 @@ export async function saveStockStorageToFirestore(items) {
     await Promise.all(
       items.map((item, idx) => {
         const id = String(item.id || idx + 1);
-        return setDoc(doc(db, 'stock_storage', id), {
+        const clean = sanitizeFirestoreData({
           ...item,
           id,
           updatedAt: new Date().toISOString(),
         });
+        return setDoc(doc(db, 'stock_storage', id), clean);
       })
     );
   } catch (error) {
@@ -390,11 +437,12 @@ export async function saveStockStorageToFirestore(items) {
 export async function saveSettingToFirestore(key, value) {
   const path = `settings/${key}`;
   try {
-    await setDoc(doc(db, 'settings', key), {
+    const clean = sanitizeFirestoreData({
       key,
       value,
       updatedAt: new Date().toISOString(),
     });
+    await setDoc(doc(db, 'settings', key), clean);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -404,11 +452,12 @@ export async function saveAuditLogToFirestore(log) {
   const id = String(Date.now() + '_' + Math.random().toString(36).substring(2, 7));
   const path = `audit_logs/${id}`;
   try {
-    await setDoc(doc(db, 'audit_logs', id), {
+    const clean = sanitizeFirestoreData({
       id,
       timestamp: new Date().toISOString(),
       ...log,
     });
+    await setDoc(doc(db, 'audit_logs', id), clean);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

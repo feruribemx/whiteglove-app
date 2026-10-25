@@ -3,7 +3,7 @@ import {
   X, Plus, Trash2, DollarSign, Clock, User, Building2, AlertCircle, Ban,
   CheckCircle2, RotateCcw, Sparkles, Copy, RefreshCw, BookmarkCheck
 } from 'lucide-react';
-import { hasFullAccess, canManagePagos } from '../lib/auth';
+import { hasFullAccess, canManagePagos, isSupervisorFerCastil } from '../lib/auth';
 import { TYPES } from '../lib/supabase';
 import { resolveClientMemory, saveClientMemory } from '../lib/clientMemory';
 
@@ -14,8 +14,8 @@ export default function ServiceModal({
   onSave,
   onAddClient,
   onOpenAddCleaner,
-  availableUnits,
-  availableCleaners,
+  availableUnits = [],
+  availableCleaners = [],
   rates,
   currentUser,
   services = [],
@@ -23,14 +23,18 @@ export default function ServiceModal({
 }) {
   const showFinancials = hasFullAccess(currentUser);
   const canEditPay = canManagePagos(currentUser);
+  const isSupervisorFer = isSupervisorFerCastil(currentUser);
   const isCleaner = currentUser?.role === 'cleaner';
   const loggedCleanerName = currentUser?.displayName || currentUser?.username || 'Cleaner';
   const isDuplicateMode = Boolean(serviceToEdit?.isDuplicate);
+  const isRealEdit = Boolean(serviceToEdit && serviceToEdit.id && !serviceToEdit.isDuplicate && !serviceToEdit.nativeEvent);
 
   // Form State
   const [fecha, setFecha] = useState('');
   const [unidad, setUnidad] = useState('');
+  const [isCustomUnit, setIsCustomUnit] = useState(false);
   const [selectedCleaners, setSelectedCleaners] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Duration: Hours & Minutes
   const [horasEnteras, setHorasEnteras] = useState(2);
@@ -76,9 +80,13 @@ export default function ServiceModal({
   };
 
   useEffect(() => {
-    if (serviceToEdit) {
+    // Determine if serviceToEdit is a real existing service with an ID, or a template/null
+    const isReal = Boolean(serviceToEdit && serviceToEdit.id && !serviceToEdit.isDuplicate && !serviceToEdit.nativeEvent);
+    const prefill = (serviceToEdit && typeof serviceToEdit === 'object' && !serviceToEdit.nativeEvent) ? serviceToEdit : null;
+
+    if (isReal) {
       setFecha(serviceToEdit.fecha || '');
-      const selectedUnit = serviceToEdit.unidad || availableUnits[0] || '';
+      const selectedUnit = serviceToEdit.unidad || availableUnits[0] || 'Cliente General';
       setUnidad(selectedUnit);
       const cls = isCleaner
         ? [loggedCleanerName]
@@ -86,7 +94,7 @@ export default function ServiceModal({
         ? serviceToEdit.cleaners
         : serviceToEdit.cleaner
         ? [serviceToEdit.cleaner]
-        : [availableCleaners[0] || '']);
+        : (isSupervisorFer ? ['Maria'] : [availableCleaners[0] || 'Maria']));
       setSelectedCleaners(cls);
 
       // Parse hours and minutes from decimal
@@ -118,18 +126,30 @@ export default function ServiceModal({
         setAutofillBanner(null);
       }
     } else {
-      // New service defaults
+      // New service or prefilled template defaults
       const today = new Date().toISOString().split('T')[0];
-      setFecha(today);
-      const initialUnit = availableUnits[0] || '';
+      setFecha(prefill?.fecha || today);
+      const initialUnit = prefill?.unidad || availableUnits[0] || 'Cliente General';
       setUnidad(initialUnit);
-      const targetCleaners = isCleaner
-        ? [loggedCleanerName]
-        : (availableCleaners[0] ? [availableCleaners[0]] : []);
+
+      let targetCleaners = [];
+      if (isCleaner) {
+        targetCleaners = [loggedCleanerName];
+      } else if (isSupervisorFer) {
+        targetCleaners = ['Maria'];
+      } else if (prefill?.cleaners?.length) {
+        targetCleaners = prefill.cleaners;
+      } else if (prefill?.cleaner) {
+        targetCleaners = [prefill.cleaner];
+      } else if (availableCleaners.length) {
+        targetCleaners = [availableCleaners[0]];
+      } else {
+        targetCleaners = ['Maria'];
+      }
       setSelectedCleaners(targetCleaners);
       setStatus('activo');
-      setTip('');
-      setCapturista(loggedCleanerName || 'WhiteGlove');
+      setTip(prefill?.tip != null ? String(prefill.tip) : '');
+      setCapturista(currentUser?.displayName || currentUser?.username || loggedCleanerName || 'WhiteGlove');
 
       // Automatic memory recall for default client
       const mem = resolveClientMemory(initialUnit, services, clientMemory);
@@ -145,11 +165,12 @@ export default function ServiceModal({
         setMinutos(mins);
         setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${initialUnit}" cargada automáticamente desde memoria.`);
       } else {
-        setCobro('');
+        setCobro(prefill?.cobro != null ? String(prefill.cobro) : '');
         setPagoCleaningTeam('');
-        setTipo('Limpieza');
-        setHorasEnteras(2);
-        setMinutos(0);
+        setTipo(prefill?.tipo || 'Limpieza');
+        const prefH = Number(prefill?.horas) || 2;
+        setHorasEnteras(Math.floor(prefH));
+        setMinutos(Math.round((prefH - Math.floor(prefH)) * 60));
         setAutofillBanner(null);
       }
 
@@ -157,7 +178,7 @@ export default function ServiceModal({
       const defaultRate = rates?.['Limpieza']?.amount || 18;
       const initialRates = {};
       const initialPagos = {};
-      targetCleaners.forEach(cl => {
+      targetCleaners.forEach((cl) => {
         initialRates[cl] = defaultRate;
         initialPagos[cl] = defaultRate * 2;
       });
@@ -165,7 +186,8 @@ export default function ServiceModal({
       setPagosPorCleaner(initialPagos);
     }
     setValidationError('');
-  }, [serviceToEdit, isOpen, isCleaner, loggedCleanerName, availableUnits, services]);
+    setIsSubmitting(false);
+  }, [serviceToEdit, isOpen, isCleaner, loggedCleanerName, isSupervisorFer, availableUnits, services]);
 
   // Recalculate suggested pay when cleaners or duration changes
   const updatePayForCleaners = (cleanersList, h, m) => {
@@ -303,61 +325,84 @@ export default function ServiceModal({
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!fecha) {
-      setValidationError('La fecha es obligatoria.');
-      return;
-    }
-    if (!unidad) {
-      setValidationError('Debe seleccionar una unidad o cliente.');
-      return;
-    }
-    if (!selectedCleaners.length) {
-      setValidationError('Debe asignar al menos a un cleaner.');
-      return;
+    if (isSubmitting) return;
+    setValidationError('');
+
+    const finalFecha = (fecha || new Date().toISOString().split('T')[0]).trim();
+    const finalUnidad = (unidad || availableUnits[0] || 'Cliente General').trim();
+
+    let finalCleaners = Array.isArray(selectedCleaners) && selectedCleaners.length > 0
+      ? selectedCleaners.filter(Boolean)
+      : [];
+    if (!finalCleaners.length) {
+      if (isCleaner) finalCleaners = [loggedCleanerName];
+      else if (isSupervisorFer) finalCleaners = ['Maria'];
+      else if (availableCleaners.length) finalCleaners = [availableCleaners[0]];
+      else finalCleaners = ['Maria'];
     }
 
     const totalDecimalHours = computeDecimalHours(horasEnteras, minutos);
-    if (totalDecimalHours <= 0) {
-      setValidationError('La duración debe ser mayor a 0 minutos.');
-      return;
-    }
+    const finalHours = totalDecimalHours > 0 ? totalDecimalHours : 2;
 
     const isDup = Boolean(serviceToEdit?.isDuplicate);
     const targetId = (!isDup && serviceToEdit?.id)
-      ? serviceToEdit.id
-      : (Date.now() + Math.floor(Math.random() * 1000));
+      ? String(serviceToEdit.id)
+      : String(Date.now() + Math.floor(Math.random() * 1000));
+
+    // Calculate rates and payments cleanly
+    const safePagos = {};
+    finalCleaners.forEach((c) => {
+      const p = pagosPorCleaner?.[c];
+      if (p != null && !Number.isNaN(Number(p)) && p !== '') {
+        safePagos[c] = Number(p);
+      } else {
+        const rate = Number(ratesPorCleaner?.[c]) || Number(rates?.[tipo]?.amount) || 18;
+        safePagos[c] = parseFloat((rate * finalHours).toFixed(2));
+      }
+    });
+
+    const safeRates = {};
+    finalCleaners.forEach((c) => {
+      safeRates[c] = Number(ratesPorCleaner?.[c]) || Number(rates?.[tipo]?.amount) || 18;
+    });
+
+    const totalCleanersPay = Object.values(safePagos).reduce((s, v) => s + (Number(v) || 0), 0);
 
     const payload = {
-      ...(serviceToEdit || {}),
+      ...(isRealEdit ? serviceToEdit : {}),
       id: targetId,
-      fecha,
-      unidad,
-      cleaners: selectedCleaners,
-      cleaner: selectedCleaners[0],
-      horas: totalDecimalHours,
-      tipo,
-      status, // 'activo' | 'cancelado'
-      cobro: showFinancials && cobro !== '' ? Number(cobro) : (serviceToEdit?.cobro ?? null),
-      pagoCleaner: pagoCleaner !== '' ? Number(pagoCleaner) : null,
-      pagosPorCleaner: Object.keys(pagosPorCleaner).length ? pagosPorCleaner : null,
-      ratesPorCleaner: Object.keys(ratesPorCleaner).length ? ratesPorCleaner : null,
-      pagoCleaningTeam: pagoCleaningTeam !== '' ? Number(pagoCleaningTeam) : null,
-      tip: tip !== '' ? Number(tip) : null,
-      capturista: capturista || serviceToEdit?.capturista || currentUser?.displayName || currentUser?.username || 'WhiteGlove',
+      fecha: finalFecha,
+      unidad: finalUnidad,
+      cleaners: finalCleaners,
+      cleaner: finalCleaners[0],
+      horas: finalHours,
+      tipo: tipo || 'Limpieza',
+      status: status || 'activo',
+      cobro: showFinancials && cobro !== '' ? (Number(cobro) || 0) : (serviceToEdit?.cobro != null ? Number(serviceToEdit.cobro) : null),
+      pagoCleaner: canEditPay && pagoCleaner !== '' ? (Number(pagoCleaner) || 0) : totalCleanersPay,
+      pagosPorCleaner: Object.keys(safePagos).length ? safePagos : null,
+      ratesPorCleaner: Object.keys(safeRates).length ? safeRates : null,
+      pagoCleaningTeam: pagoCleaningTeam !== '' ? (Number(pagoCleaningTeam) || 0) : null,
+      tip: tip !== '' ? (Number(tip) || 0) : null,
+      capturista: capturista || currentUser?.displayName || currentUser?.username || 'WhiteGlove',
     };
+
     delete payload.isDuplicate;
+    delete payload.nativeEvent;
+    delete payload._reactName;
 
     // Persist client memory so future and recurring duplicates fill in automatic
-    if (unidad && cobro !== '') {
-      saveClientMemory(unidad, {
+    if (finalUnidad && cobro !== '') {
+      saveClientMemory(finalUnidad, {
         cobro: Number(cobro) || 0,
         tipo,
-        horas: totalDecimalHours,
-        pagoCleaningTeam: pagoCleaningTeam !== '' ? Number(pagoCleaningTeam) : 0,
-        cleaners: selectedCleaners,
+        horas: finalHours,
+        pagoCleaningTeam: pagoCleaningTeam !== '' ? (Number(pagoCleaningTeam) || 0) : 0,
+        cleaners: finalCleaners,
       });
     }
 
+    setIsSubmitting(true);
     onSave(payload);
   };
 
@@ -374,10 +419,10 @@ export default function ServiceModal({
           <div className="flex items-center gap-2.5">
             <span className="font-serif text-lg font-bold text-[#FAF7F1]">
               {isCleaner
-                ? (serviceToEdit?.id ? 'Editar Mi Servicio' : 'Registrar Mi Servicio')
+                ? (isRealEdit ? 'Editar Mi Servicio' : 'Registrar Mi Servicio')
                 : (isDuplicateMode
                   ? 'Duplicar Servicio (Cliente Recurrente)'
-                  : (serviceToEdit ? 'Editar Servicio' : 'Capturar Nuevo Servicio'))}
+                  : (isRealEdit ? 'Editar Servicio' : 'Capturar Nuevo Servicio'))}
             </span>
             {status === 'cancelado' && (
               <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-400/40 text-[10px] font-bold">
@@ -517,29 +562,58 @@ export default function ServiceModal({
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-bold text-slate-700">Unidad / Cliente</label>
-              <button
-                type="button"
-                onClick={() => {
-                  setNewClientError('');
-                  setShowNewClientModal(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-[#0B1D4A] bg-[#FFB566]/25 hover:bg-[#FFB566]/40 border border-[#FFB566]/70 rounded-lg transition-all shadow-2xs cursor-pointer active:scale-98"
-                title="Registrar un nuevo cliente o residencia para capturar servicios"
-              >
-                <Plus className="w-3.5 h-3.5 text-[#0B1D4A] stroke-[3]" />
-                <span>+ Nuevo Cliente</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomUnit(!isCustomUnit)}
+                  className="text-[11px] font-bold text-[#0B1D4A] hover:underline cursor-pointer"
+                >
+                  {isCustomUnit ? '← Elegir de lista' : '✏️ Escribir otro'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewClientError('');
+                    setShowNewClientModal(true);
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold text-[#0B1D4A] bg-[#FFB566]/25 hover:bg-[#FFB566]/40 border border-[#FFB566]/70 rounded-lg transition-all shadow-2xs cursor-pointer active:scale-98"
+                  title="Registrar un nuevo cliente o residencia para capturar servicios"
+                >
+                  <Plus className="w-3 h-3 text-[#0B1D4A] stroke-[3]" />
+                  <span>+ Nuevo</span>
+                </button>
+              </div>
             </div>
-            <select
-              value={unidad}
-              onChange={(e) => handleUnitSelect(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] bg-white font-semibold"
-              required
-            >
-              {availableUnits.map((u) => (
-                <option key={u} value={u}>{u}</option>
-              ))}
-            </select>
+
+            {isCustomUnit ? (
+              <div className="relative">
+                <input
+                  type="text"
+                  list="available-units-list"
+                  placeholder="Escribe el nombre del cliente o unidad (ej: Mohammed, Phillys...)"
+                  value={unidad}
+                  onChange={(e) => handleUnitSelect(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] bg-white font-semibold"
+                  required
+                />
+                <datalist id="available-units-list">
+                  {availableUnits.map((u) => (
+                    <option key={u} value={u} />
+                  ))}
+                </datalist>
+              </div>
+            ) : (
+              <select
+                value={unidad}
+                onChange={(e) => handleUnitSelect(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] bg-white font-semibold"
+                required
+              >
+                {availableUnits.map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+            )}
 
             {/* Client Memory & Recurrence Info Badge */}
             {memoryInfo && memoryInfo.cobro > 0 ? (
@@ -851,9 +925,17 @@ export default function ServiceModal({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 font-bold text-[#0B1D4A] bg-[#FFB566] hover:bg-[#E89A45] rounded-xl text-xs shadow-xs transition-all active:scale-98"
+              disabled={isSubmitting}
+              className="px-5 py-2 font-bold text-[#0B1D4A] bg-[#FFB566] hover:bg-[#E89A45] rounded-xl text-xs shadow-xs transition-all active:scale-98 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
             >
-              {serviceToEdit ? 'Guardar Cambios' : 'Registrar Servicio'}
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#0B1D4A]" />
+                  <span>Guardando...</span>
+                </>
+              ) : (
+                <span>{isRealEdit ? 'Guardar Cambios' : 'Registrar Servicio'}</span>
+              )}
             </button>
           </div>
         </form>

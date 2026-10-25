@@ -373,10 +373,11 @@ export default function ServicesList({
             </button>
           )}
 
-          {canEdit && (
+          {onOpenNewService && (
             <button
-              onClick={onOpenNewService}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#0B1D4A] hover:bg-[#1E3670] text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
+              type="button"
+              onClick={() => onOpenNewService()}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#0B1D4A] hover:bg-[#1E3670] text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer active:scale-98"
             >
               <Plus className="w-3.5 h-3.5 text-[#FFB566] stroke-[3]" />
               <span>Nuevo Servicio</span>

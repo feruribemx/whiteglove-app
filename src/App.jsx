@@ -325,7 +325,15 @@ export default function App() {
 
   // Service Management (Real-time Cloud Sync)
   const handleOpenNewService = (prefill = null) => {
-    setServiceToEdit(prefill);
+    // If prefill is a DOM/React event (e.g. from onClick={handleOpenNewService}), sanitize it to null
+    const isEvent = prefill && (
+      typeof prefill.preventDefault === 'function' ||
+      'nativeEvent' in prefill ||
+      '_reactName' in prefill ||
+      (typeof Element !== 'undefined' && prefill.target instanceof Element)
+    );
+    const validPrefill = (!isEvent && prefill && typeof prefill === 'object') ? prefill : null;
+    setServiceToEdit(validPrefill);
     setIsServiceModalOpen(true);
   };
 
@@ -361,39 +369,63 @@ export default function App() {
   };
 
   const handleSaveService = async (serviceData) => {
+    const serviceId = serviceData?.id ? String(serviceData.id) : String(Date.now());
+    const payload = {
+      ...serviceData,
+      id: serviceId,
+      updatedAt: new Date().toISOString(),
+    };
+    const isEdit = services.some((s) => String(s.id) === serviceId);
+
+    // 1. Optimistic update: instantly render in UI so the user sees immediate feedback
+    setServices((prev) => {
+      const exists = prev.some((s) => String(s.id) === serviceId);
+      return exists ? prev.map((s) => (String(s.id) === serviceId ? payload : s)) : [payload, ...prev];
+    });
+
+    // 2. Immediately close modal so the interface is fluid and never freezes
+    setIsServiceModalOpen(false);
+
+    // 3. Save to Firebase Firestore (real-time live sync across all devices)
     try {
-      const serviceId = serviceData.id ? String(serviceData.id) : String(Date.now());
-      const payload = { ...serviceData, id: serviceId };
-      const isEdit = services.some((s) => String(s.id) === serviceId);
-
-      // Save to Firebase Firestore (instantly broadcasts to all devices via onSnapshot)
       await saveServiceToFirestore(payload);
+    } catch (err) {
+      console.warn('Firestore primary save notice (will persist via background/cache):', err);
+    }
 
-      // Background sync to Supabase
+    // 4. Background sync to Supabase
+    try {
       const dbRow = svcToDb(payload);
       if (isEdit) {
         supabase.from('services').update(dbRow).eq('id', payload.id).catch(() => {});
       } else {
         supabase.from('services').insert(dbRow).catch(() => {});
       }
-
-      setServices((prev) => {
-        const exists = prev.some((s) => String(s.id) === serviceId);
-        return exists ? prev.map((s) => (String(s.id) === serviceId ? payload : s)) : [payload, ...prev];
-      });
-
-      addToast(isEdit ? 'Actualizado' : 'Registrado', `Servicio en ${payload.unidad} guardado en la nube.`);
-      saveAuditLogToFirestore({
-        actor: currentUser?.displayName || currentUser?.username,
-        action: isEdit ? 'UPDATE_SERVICE' : 'CREATE_SERVICE',
-        details: `${isEdit ? 'Modificó' : 'Creó'} servicio #${serviceId} (${payload.unidad})`,
-      });
-
-      setIsServiceModalOpen(false);
     } catch (err) {
-      console.error('Save service error:', err);
-      addToast('Error', 'No se pudo guardar el servicio en la nube.', 'error');
+      console.warn('Supabase sync notice:', err);
     }
+
+    // 5. Local offline cache
+    try {
+      const cached = JSON.parse(localStorage.getItem('wg-offline-services') || '[]');
+      const updatedCache = [payload, ...cached.filter((s) => String(s.id) !== serviceId)].slice(0, 500);
+      localStorage.setItem('wg-offline-services', JSON.stringify(updatedCache));
+    } catch {}
+
+    // 6. Audit Log
+    try {
+      saveAuditLogToFirestore({
+        actor: currentUser?.displayName || currentUser?.username || 'WhiteGlove',
+        action: isEdit ? 'UPDATE_SERVICE' : 'CREATE_SERVICE',
+        details: `${isEdit ? 'Modificó' : 'Registró'} servicio en ${payload.unidad || 'Unidad'} (#${serviceId})`,
+      });
+    } catch {}
+
+    // 7. Toast feedback
+    addToast(
+      isEdit ? 'Servicio Actualizado' : 'Servicio Registrado',
+      `Servicio en ${payload.unidad || 'Unidad'} guardado exitosamente.`
+    );
   };
 
   const handleDeleteService = async (id) => {

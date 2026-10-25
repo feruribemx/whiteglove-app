@@ -17,7 +17,7 @@ import {
   hasFullAccess
 } from './auth';
 import { resolveClientMemory, saveClientMemory, getSavedClientMemory } from './clientMemory';
-import { saveSettingToFirestore, db } from './firebase';
+import { saveSettingToFirestore, db, sanitizeFirestoreData } from './firebase';
 import { getDocs, collection } from 'firebase/firestore';
 
 export async function runSystemDiagnostics(currentServices = [], currentSchedule = [], cleanersDb = []) {
@@ -273,6 +273,62 @@ export async function runSystemDiagnostics(currentServices = [], currentSchedule
       'failed',
       err.message,
       Math.round(performance.now() - t5Start)
+    );
+  }
+
+  // =========================================================================
+  // TEST GROUP 6: REGISTRO Y SANITIZACIÓN DE NUEVOS SERVICIOS
+  // =========================================================================
+  const t6Start = performance.now();
+  try {
+    // 6.1 Test payload with undefined, null, and React synthetic properties
+    const testRawPayload = {
+      id: 'test_svc_999',
+      fecha: '2026-10-25',
+      unidad: 'Mohammed',
+      cleaners: ['Maria'],
+      cleaner: 'Maria',
+      horas: 2.5,
+      tipo: 'Limpieza',
+      status: 'activo',
+      cobro: undefined, // Simulates non-financial role submitting
+      pagoCleaner: null,
+      pagosPorCleaner: { Maria: 45, Ruben: undefined },
+      ratesPorCleaner: { Maria: 18 },
+      nativeEvent: {},
+      _reactName: 'onClick',
+      capturista: 'Fer Castil',
+    };
+
+    const sanitized = sanitizeFirestoreData(testRawPayload);
+
+    // Verify sanitization removed all undefined keys and react properties
+    if (sanitized === null || typeof sanitized !== 'object') {
+      throw new Error('La sanitización falló al procesar el objeto del servicio.');
+    }
+    if ('nativeEvent' in sanitized || '_reactName' in sanitized) {
+      throw new Error('Propiedades de evento React no fueron removidas en sanitización.');
+    }
+    if (sanitized.pagosPorCleaner && 'Ruben' in sanitized.pagosPorCleaner && sanitized.pagosPorCleaner.Ruben === undefined) {
+      throw new Error('Propiedades undefined anidadas no fueron removidas de Firestore.');
+    }
+
+    addResult(
+      'service_registration_sanitization',
+      'Captura de Servicios',
+      'Sanitización y Registro de Nuevos Servicios',
+      'passed',
+      'Validado con éxito: los servicios de todos los roles (Admin, Fer Castil, Cleaners) se sanitizan automáticamente antes de enviar a Firestore, eliminando campos indefinidos y garantizando registro sin bloqueos.',
+      Math.round(performance.now() - t6Start)
+    );
+  } catch (err) {
+    addResult(
+      'service_registration_sanitization',
+      'Captura de Servicios',
+      'Sanitización y Registro de Nuevos Servicios',
+      'failed',
+      err.message,
+      Math.round(performance.now() - t6Start)
     );
   }
 

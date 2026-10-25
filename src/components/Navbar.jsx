@@ -125,11 +125,12 @@ export default function Navbar({
           {/* Right Action Zone: Quick Capture + Integrated User Profile Dropdown */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             
-            {/* Quick Capture Button (Only on Admin, compact to preserve space) */}
-            {isAdmin && (
+            {/* Quick Capture Button (Available for all team members) */}
+            {onOpenNewService && (
               <button
-                onClick={onOpenNewService}
-                className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 sm:py-2 bg-gradient-to-r from-[#FFB566] to-[#E89A45] text-[#0B1D4A] font-bold text-xs rounded-xl hover:brightness-105 active:scale-[0.98] transition-all shadow-xs whitespace-nowrap"
+                type="button"
+                onClick={() => onOpenNewService()}
+                className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 sm:py-2 bg-gradient-to-r from-[#FFB566] to-[#E89A45] text-[#0B1D4A] font-bold text-xs rounded-xl hover:brightness-105 active:scale-[0.98] transition-all shadow-xs whitespace-nowrap cursor-pointer"
                 title={lang === 'en' ? 'New Service Entry' : 'Capturar Nuevo Servicio'}
               >
                 <Plus className="w-3.5 h-3.5 stroke-[3]" />
@@ -417,18 +418,22 @@ export default function Navbar({
 
             {/* Mobile Actions */}
             <div className="pt-2 border-t border-slate-700/80 space-y-1.5">
+              {onOpenNewService && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenNewService();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-xs cursor-pointer active:scale-98"
+                >
+                  <Plus className="w-4 h-4 stroke-[3]" />
+                  <span>{lang === 'en' ? 'New Service Entry' : 'Capturar Nuevo Servicio'}</span>
+                </button>
+              )}
+
               {isAdmin && (
                 <>
-                  <button
-                    onClick={() => {
-                      onOpenNewService();
-                      setMobileMenuOpen(false);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-xs"
-                  >
-                    <Plus className="w-4 h-4 stroke-[3]" />
-                    <span>{lang === 'en' ? 'New Service Entry' : 'Capturar Nuevo Servicio'}</span>
-                  </button>
 
                   {onOpenAddCleaner && (
                     <button
