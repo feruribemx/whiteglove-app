@@ -1,0 +1,67 @@
+================================================================================
+WHITEGLOVE PROFESSIONAL SERVICES - CONTROL DE ACCESOS Y CREDENCIALES
+Fecha de emisión: 26 de Octubre de 2026
+Base de datos: Cloud Firestore (ai-studio-whitegloveapp-93a9352b-962c-4654-a80f-f6fdc3e00b17)
+================================================================================
+
+1. ADMINISTRADORES GENERALES (Acceso Total y Métricas Financieras)
+--------------------------------------------------------------------------------
+* Fernando Uribe:
+  - Usuario: Fernandouribe (o fernandouribe)
+  - Contraseña principal: Fernando2025!
+  - Alternativas válidas: WhiteGlove2025! / fernando2025 / admin123
+  - Permisos: Control total, finanzas, facturación, clientes, cleaners, nómina, agenda.
+
+* Michelle López:
+  - Usuario: MichelleAdmin (o michelleadmin)
+  - Contraseña principal: Michelle2025!
+  - Alternativas válidas: WhiteGlove2025! / michelle2025 / admin123
+  - Permisos: Control total, finanzas, facturación, clientes, cleaners, nómina, agenda.
+
+--------------------------------------------------------------------------------
+2. SUPERVISIÓN OPERATIVA (Servicios Propios y Operación de Equipo)
+--------------------------------------------------------------------------------
+* Fernanda Castil (María):
+  - Usuario: FerCastil (o fercastil / maria / fernandacastil)
+  - Contraseña principal: Rocky1.
+  - Alternativas válidas: Rocky1 / rocky1. / rocky1 / FerCastil2025! / maria123
+  - Permisos: Supervisión operativa, registro de nuevos cleaners, visualización de sus propios servicios y turnos.
+
+--------------------------------------------------------------------------------
+3. CLEANERS (Acceso Personal a Turnos y Registro de Horas)
+--------------------------------------------------------------------------------
+* Jazz:
+  - Selector/Usuario: Jazz
+  - Contraseña: jazz123
+
+* Karen:
+  - Selector/Usuario: Karen
+  - Contraseña: karen123
+
+* Kary:
+  - Selector/Usuario: Kary
+  - Contraseña: kary123
+
+* Mafer (Cleaner independiente, diferente a María):
+  - Selector/Usuario: Mafer
+  - Contraseña: mafer123
+
+* María (Fer Castil):
+  - Selector/Usuario: Maria
+  - Contraseña: maria123 (o Rocky1.)
+
+* Mariana:
+  - Selector/Usuario: Mariana
+  - Contraseña: mariana123
+
+* Nancy:
+  - Selector/Usuario: Nancy
+  - Contraseña: nancy123
+
+* Ruben:
+  - Selector/Usuario: Ruben
+  - Contraseña: ruben123
+
+================================================================================
+FIN DEL ARCHIVO DE CREDENCIALES
+================================================================================

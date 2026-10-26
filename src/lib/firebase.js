@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import {
+  initializeFirestore,
   getFirestore,
   collection,
   doc,
@@ -9,7 +10,6 @@ import {
   setDoc,
   deleteDoc,
   onSnapshot,
-  getDocFromServer,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import {
@@ -23,8 +23,16 @@ import {
 // Initialize Firebase App
 export const app = initializeApp(firebaseConfig);
 
-// CRITICAL: The app will break without this line as specified in skill guidelines
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// CRITICAL: Initialize Firestore with experimentalForceLongPolling enabled.
+// This prevents [code=unavailable] and "Could not reach Cloud Firestore backend"
+// connection errors inside iframe previews, proxies, and cloud sandbox environments.
+export const db = initializeFirestore(
+  app,
+  {
+    experimentalForceLongPolling: true,
+  },
+  firebaseConfig.firestoreDatabaseId
+);
 export const auth = getAuth(app);
 
 export const OperationType = {
@@ -62,23 +70,20 @@ export function handleFirestoreError(error, operationType, path) {
 }
 
 /**
- * Validate connection to Firestore on initial boot
+ * Validate connection to Firestore
  */
 export async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'settings', 'connection_test'));
-    console.log('WhiteGlove: Conexión en la nube con Firestore establecida.');
+    const snap = await getDoc(doc(db, 'settings', 'rates'));
+    if (snap.exists()) {
+      console.log('WhiteGlove: Conexión en la nube con Firestore establecida.');
+    }
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('WhiteGlove: Modo sin conexión o cliente offline.');
-    }
+    console.warn('WhiteGlove: Conexión Firestore en proceso o sincronizando en segundo plano.');
     return false;
   }
 }
-
-// Initial connection test
-testConnection();
 
 // ==========================================
 // REAL-TIME SUBSCRIBERS (Live Sync on all devices)
@@ -242,6 +247,25 @@ export function subscribeAuditLogs(onUpdate, onError) {
     },
     (error) => {
       handleFirestoreError(error, OperationType.LIST, 'audit_logs');
+      if (onError) onError(error);
+    }
+  );
+}
+
+export function subscribeInquiries(onUpdate, onError) {
+  const colRef = collection(db, 'inquiries');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const items = [];
+      snapshot.forEach((d) => {
+        items.push({ id: d.id, ...d.data() });
+      });
+      items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      onUpdate(items);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'inquiries');
       if (onError) onError(error);
     }
   );
@@ -460,6 +484,42 @@ export async function saveAuditLogToFirestore(log) {
     await setDoc(doc(db, 'audit_logs', id), clean);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveInquiryToFirestore(inquiry) {
+  const id = String(inquiry?.id || `inq_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+  const path = `inquiries/${id}`;
+  try {
+    const raw = {
+      ...inquiry,
+      id,
+      status: inquiry?.status || 'nueva', // 'nueva' | 'contactada' | 'agendada' | 'cerrada'
+      createdAt: inquiry?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const clean = sanitizeFirestoreData(raw);
+    await setDoc(doc(db, 'inquiries', id), clean);
+    return clean;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function updateInquiryStatusInFirestore(inquiryId, status) {
+  const id = String(inquiryId);
+  const path = `inquiries/${id}`;
+  try {
+    const clean = sanitizeFirestoreData({
+      status,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'inquiries', id), clean, { merge: true });
+    return { id, status };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
   }
 }
 

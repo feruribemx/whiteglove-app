@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ClipboardList, Package, Calendar, BarChart3, DollarSign,
   Plus, LogOut, User, Menu, X, Shield, History, Globe,
-  ChevronDown, Check, Sparkles, ExternalLink, UserPlus
+  ChevronDown, Check, Sparkles, ExternalLink, UserPlus, Mail
 } from 'lucide-react';
 import { initialsOf, hasFullAccess } from '../lib/auth';
 
@@ -16,6 +16,8 @@ export default function Navbar({
   onOpenAddCleaner,
   onOpenDiagnostics,
   onPreviewLanding,
+  onOpenInquiries,
+  inquiriesCount = 0,
   lang = 'es',
   setLang,
 }) {
@@ -122,9 +124,29 @@ export default function Navbar({
             })}
           </nav>
 
-          {/* Right Action Zone: Quick Capture + Integrated User Profile Dropdown */}
+          {/* Right Action Zone: Inquiries Badge + Quick Capture + Integrated User Profile Dropdown */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             
+            {/* Online Inquiries Quick Badge (Admins / Supervisors) */}
+            {onOpenInquiries && (
+              <button
+                type="button"
+                onClick={onOpenInquiries}
+                className="relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-[#1E3670] hover:bg-[#28458c] border border-slate-700/80 hover:border-[#FFB566]/60 text-slate-200 hover:text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs"
+                title={lang === 'en' ? 'Online Quote Requests' : 'Prospectos y Cotizaciones Web'}
+              >
+                <Mail className="w-3.5 h-3.5 text-[#FFB566]" />
+                <span className="hidden sm:inline">
+                  {lang === 'en' ? 'Inquiries' : 'Prospectos'}
+                </span>
+                {inquiriesCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#FFB566] text-[#0B1D4A] animate-pulse">
+                    {inquiriesCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* Quick Capture Button (Available for all team members) */}
             {onOpenNewService && (
               <button
@@ -211,6 +233,35 @@ export default function Navbar({
                   <div className="p-2 space-y-1">
                     {isAdmin && (
                       <>
+                        {onOpenInquiries && (
+                          <button
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              onOpenInquiries();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
+                          >
+                            <div className="w-7 h-7 rounded-lg bg-[#FFB566]/20 flex items-center justify-center text-[#FFB566] shrink-0">
+                              <Mail className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="block font-semibold">
+                                  {lang === 'en' ? 'Online Quote Requests' : 'Prospectos Web & Cotizaciones'}
+                                </span>
+                                {inquiriesCount > 0 && (
+                                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-[#FFB566] text-[#0B1D4A]">
+                                    {inquiriesCount} nuevas
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-400 block font-normal">
+                                {lang === 'en' ? 'Review requests received from public website' : 'Revisa cotizaciones enviadas por clientes desde la página'}
+                              </span>
+                            </div>
+                          </button>
+                        )}
+
                         {onOpenAddCleaner && (
                           <button
                             onClick={() => {
@@ -434,6 +485,25 @@ export default function Navbar({
 
               {isAdmin && (
                 <>
+                  {onOpenInquiries && (
+                    <button
+                      onClick={() => {
+                        onOpenInquiries();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 rounded-xl"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-[#FFB566]" />
+                        <span>{lang === 'en' ? 'Online Quote Requests' : 'Prospectos Web & Cotizaciones'}</span>
+                      </div>
+                      {inquiriesCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FFB566] text-[#0B1D4A]">
+                          {inquiriesCount} nuevas
+                        </span>
+                      )}
+                    </button>
+                  )}
 
                   {onOpenAddCleaner && (
                     <button

@@ -102,11 +102,23 @@ export async function syncPayrollCloud() {
 }
 
 /**
+ * Safely extract a cleaner's string name from either a string or an object
+ */
+export function getCleanerNameString(cleaner) {
+  if (!cleaner) return '';
+  if (typeof cleaner === 'string') return cleaner.trim();
+  if (typeof cleaner === 'object') {
+    return String(cleaner.name || cleaner.displayName || cleaner.cleaner || '').trim();
+  }
+  return String(cleaner).trim();
+}
+
+/**
  * Generate a consistent unique key for a cleaner in a given period
  */
 export function buildPaymentKey(cleanerName, periodKey) {
-  const cleanName = (cleanerName || '').trim().toLowerCase();
-  const cleanPeriod = (periodKey || 'current').trim().toLowerCase();
+  const cleanName = getCleanerNameString(cleanerName).toLowerCase();
+  const cleanPeriod = String(periodKey || 'current').trim().toLowerCase();
   return `${cleanName}__${cleanPeriod}`;
 }
 
@@ -115,7 +127,7 @@ export function buildPaymentKey(cleanerName, periodKey) {
  */
 export function buildServiceCleanerKey(serviceId, cleanerName) {
   const sId = serviceId != null ? String(serviceId).trim() : '';
-  const cName = (cleanerName || '').trim().toLowerCase();
+  const cName = getCleanerNameString(cleanerName).toLowerCase();
   return `${sId}__${cName}`;
 }
 
@@ -123,9 +135,9 @@ export function buildServiceCleanerKey(serviceId, cleanerName) {
  * Generate a fallback composite key based on date + unit + cleaner
  */
 export function buildServiceDateUnitCleanerKey(fecha, unidad, cleanerName) {
-  const dateStr = (fecha || '').trim();
-  const uName = (unidad || '').trim().toLowerCase();
-  const cName = (cleanerName || '').trim().toLowerCase();
+  const dateStr = String(fecha || '').trim();
+  const uName = String(unidad || '').trim().toLowerCase();
+  const cName = getCleanerNameString(cleanerName).toLowerCase();
   return `${dateStr}__${uName}__${cName}`;
 }
 
@@ -183,9 +195,9 @@ export function markCleanerPayrollAsPaid(cleanerName, periodKey, details = {}) {
       serviceId: svc.id,
       serviceDate: svc.fecha,
       unit: svc.unidad,
-      cleaner: (cleanerName || '').trim(),
+      cleaner: getCleanerNameString(cleanerName),
       paymentId: key,
-      periodKey: (periodKey || '').trim(),
+      periodKey: String(periodKey || '').trim(),
       periodLabel: details.periodLabel || 'Período actual',
       periodType: details.periodType || 'Nómina',
       amountPaid: subtotal,
@@ -206,8 +218,8 @@ export function markCleanerPayrollAsPaid(cleanerName, periodKey, details = {}) {
 
   const record = {
     id: key,
-    cleaner: (cleanerName || '').trim(),
-    periodKey: (periodKey || '').trim(),
+    cleaner: getCleanerNameString(cleanerName),
+    periodKey: String(periodKey || '').trim(),
     periodLabel: details.periodLabel || 'Período actual',
     periodType: details.periodType || 'Nómina',
     amount: Number(details.amount) || 0,

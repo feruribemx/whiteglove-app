@@ -45,6 +45,11 @@ service cloud.firestore {
       allow write: if isValidId(settingId);
     }
 
+    match /inquiries/{inquiryId} {
+      allow read: if true;
+      allow write: if isValidId(inquiryId);
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -10,6 +10,7 @@ import AnalyticsView from './components/AnalyticsView';
 import AuditLogModal from './components/AuditLogModal';
 import AddCleanerModal from './components/AddCleanerModal';
 import SystemDiagnosticsModal from './components/SystemDiagnosticsModal';
+import InquiriesModal from './components/InquiriesModal';
 import LoginView from './components/LoginView';
 import LandingView from './components/LandingView';
 import Toast from './components/Toast';
@@ -47,6 +48,7 @@ import {
   subscribeStockByUnit,
   subscribeStockStorage,
   subscribeSettings,
+  subscribeInquiries,
   saveServiceToFirestore,
   deleteServiceFromFirestore,
   saveScheduleShiftToFirestore,
@@ -111,6 +113,8 @@ export default function App() {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isAddCleanerModalOpen, setIsAddCleanerModalOpen] = useState(false);
   const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState(false);
+  const [inquiries, setInquiries] = useState([]);
+  const [isInquiriesModalOpen, setIsInquiriesModalOpen] = useState(false);
   const [clientMemory, setClientMemory] = useState(() => getSavedClientMemory());
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [previewLanding, setPreviewLanding] = useState(false);
@@ -275,6 +279,12 @@ export default function App() {
       }
     });
 
+    const unsubInquiries = subscribeInquiries((liveInquiries) => {
+      if (liveInquiries) {
+        setInquiries(liveInquiries);
+      }
+    });
+
     return () => {
       isMounted = false;
       unsubServices();
@@ -284,6 +294,7 @@ export default function App() {
       unsubStockByUnit();
       unsubStockStorage();
       unsubSettings();
+      unsubInquiries();
     };
   }, []);
 
@@ -625,10 +636,10 @@ export default function App() {
   }
 
   const showFinancials = hasFullAccess(currentUser);
+  const newInquiriesCount = inquiries.filter((i) => (i.status || 'nueva').toLowerCase() === 'nueva').length;
 
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-[#0B1D4A] flex flex-col pb-20 md:pb-12 w-full max-w-full overflow-x-hidden">
-      {/* Adaptive Luxury Navbar with consolidated user menu */}
       {/* Adaptive Luxury Navbar with consolidated user menu */}
       <Navbar
         activeTab={activeTab}
@@ -640,6 +651,8 @@ export default function App() {
         onOpenAuditLog={() => setIsAuditModalOpen(true)}
         onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)}
         onPreviewLanding={() => setPreviewLanding(true)}
+        onOpenInquiries={currentUser?.role === 'admin' ? () => setIsInquiriesModalOpen(true) : null}
+        inquiriesCount={newInquiriesCount}
         lang={portalLang}
         setLang={handleSetPortalLang}
       />
@@ -771,7 +784,7 @@ export default function App() {
         {activeTab === 'payroll' && currentUser.role === 'admin' && (
           <PayrollView
             services={visibleServices}
-            cleaners={cleanersDb}
+            cleaners={availableCleaners}
             periodFilter={periodFilter}
             setPeriodFilter={setPeriodFilter}
             onEditService={handleEditService}
@@ -838,6 +851,20 @@ export default function App() {
               addToast('Memoria Guardada', `Memoria para "${unit}" emitida a la nube.`);
             }
           }}
+        />
+      )}
+
+      {/* Online Inquiries & Quote Requests Modal (Propuesta #1 - Lead Management) */}
+      {isInquiriesModalOpen && (
+        <InquiriesModal
+          isOpen={isInquiriesModalOpen}
+          onClose={() => setIsInquiriesModalOpen(false)}
+          inquiries={inquiries}
+          onUpdateStatus={(id, status) => {
+            setInquiries((prev) => prev.map((inq) => (inq.id === id ? { ...inq, status } : inq)));
+            addToast('Prospecto Actualizado', `Estado de solicitud cambiado a "${status}".`);
+          }}
+          currentUser={currentUser}
         />
       )}
 

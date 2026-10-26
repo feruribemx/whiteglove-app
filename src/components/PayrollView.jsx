@@ -22,6 +22,7 @@ import {
   formatPaymentDate,
   buildPaymentKey,
 } from '../lib/payrollPayments';
+import { openPrintableVoucher } from '../lib/voucherPdf';
 
 // Helper to format ISO YYYY-MM-DD
 function toDateStr(d) {
@@ -109,8 +110,24 @@ export default function PayrollView({
     currentUser && (currentUser.username || '').toLowerCase() === 'fercastil'
   );
   const effectiveCleaners = useMemo(() => {
-    return cleaners;
-  }, [cleaners]);
+    const set = new Set();
+    if (Array.isArray(cleaners)) {
+      cleaners.forEach((c) => {
+        const name = typeof c === 'string' ? c.trim() : String(c?.name || c?.displayName || '').trim();
+        if (name) set.add(name);
+      });
+    }
+    if (Array.isArray(services)) {
+      services.forEach((s) => {
+        const raw = s.cleaners?.length ? s.cleaners : s.cleaner ? [s.cleaner] : [];
+        raw.forEach((cl) => {
+          const name = typeof cl === 'string' ? cl.trim() : String(cl?.name || '').trim();
+          if (name) set.add(name);
+        });
+      });
+    }
+    return Array.from(set).sort();
+  }, [cleaners, services]);
 
   // Top Level Payroll Tab: 'current' (Control de Nómina) | 'history' (Historial de Pagos)
   const [payrollTab, setPayrollTab] = useState('current');
@@ -320,16 +337,20 @@ export default function PayrollView({
     });
 
     servicesInPeriod.forEach((svc) => {
-      const svcCleaners = svc.cleaners?.length
+      const rawCleaners = svc.cleaners?.length
         ? svc.cleaners
         : svc.cleaner
         ? [svc.cleaner]
         : [];
 
+      const svcCleaners = rawCleaners
+        .map((cl) => (typeof cl === 'string' ? cl.trim() : String(cl?.name || '').trim()))
+        .filter(Boolean);
+
       const isCancelled = svc.status === 'cancelado';
 
       svcCleaners.forEach((cl) => {
-        if (isSupervisorFer && cl.trim().toLowerCase() !== 'maria') return;
+        if (isSupervisorFer && cl.toLowerCase() !== 'maria') return;
         if (!stats[cl]) {
           stats[cl] = {
             cleaner: cl,
@@ -632,15 +653,16 @@ export default function PayrollView({
   const fullPaymentHistory = useMemo(() => {
     const all = getAllPaymentHistory();
     return all.filter((rec) => {
-      if (isSupervisorFer && (rec.cleaner || '').trim().toLowerCase() !== 'maria') {
+      const cleanerNameStr = typeof rec.cleaner === 'string' ? rec.cleaner.trim() : String(rec.cleaner?.name || '').trim();
+      if (isSupervisorFer && cleanerNameStr.toLowerCase() !== 'maria') {
         return false;
       }
-      if (historyCleanerFilter !== 'all' && rec.cleaner !== historyCleanerFilter) {
+      if (historyCleanerFilter !== 'all' && cleanerNameStr !== historyCleanerFilter) {
         return false;
       }
       if (historySearch.trim()) {
         const q = historySearch.toLowerCase().trim();
-        const str = `${rec.cleaner} ${rec.periodLabel} ${rec.reference} ${rec.paymentMethod} ${rec.notes} ${rec.id}`.toLowerCase();
+        const str = `${cleanerNameStr} ${rec.periodLabel} ${rec.reference} ${rec.paymentMethod} ${rec.notes} ${rec.id}`.toLowerCase();
         if (!str.includes(q)) return false;
       }
       return true;
@@ -650,7 +672,8 @@ export default function PayrollView({
   // Overall history statistics
   const historyStats = useMemo(() => {
     const all = getAllPaymentHistory().filter((r) => {
-      if (isSupervisorFer) return (r.cleaner || '').trim().toLowerCase() === 'maria';
+      const cleanerNameStr = typeof r.cleaner === 'string' ? r.cleaner.trim() : String(r.cleaner?.name || '').trim();
+      if (isSupervisorFer) return cleanerNameStr.toLowerCase() === 'maria';
       return true;
     });
     const totalPaid = all.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
@@ -735,7 +758,11 @@ export default function PayrollView({
     // Find cleaner phone if registered in the team
     const cleanerObj = (cleaners || []).find((c) => {
       const n = typeof c === 'string' ? c : c?.name;
-      return (n || '').trim().toLowerCase() === (activeCleanerData?.cleaner || '').trim().toLowerCase();
+      const nStr = typeof n === 'string' ? n.trim().toLowerCase() : String(n || '').trim().toLowerCase();
+      const activeStr = typeof activeCleanerData?.cleaner === 'string'
+        ? activeCleanerData.cleaner.trim().toLowerCase()
+        : String(activeCleanerData?.cleaner?.name || activeCleanerData?.cleaner || '').trim().toLowerCase();
+      return nStr === activeStr;
     });
     const rawPhone = typeof cleanerObj === 'object' && cleanerObj?.phone ? String(cleanerObj.phone).replace(/\D/g, '') : '';
     const url = rawPhone
@@ -757,7 +784,11 @@ export default function PayrollView({
   };
 
   const handlePrint = () => {
-    window.print();
+    if (activeCleanerData) {
+      openPrintableVoucher(activeCleanerData, dateFilterLabel, activeCleanerPayment);
+    } else {
+      window.print();
+    }
   };
 
   const handleManualAdjustmentChange = (cleanerName, val) => {
@@ -1961,17 +1992,31 @@ export default function PayrollView({
                             </td>
 
                             <td className="px-5 py-3.5 text-center">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedCleaner(row.cleaner);
-                                }}
-                                className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 hover:bg-[#FFB566] hover:text-[#0B1D4A] text-slate-700 text-[11px] font-bold rounded-lg transition-colors shadow-2xs"
-                              >
-                                <span>Ver Voucher</span>
-                                <ChevronRight className="w-3 h-3" />
-                              </button>
+                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openPrintableVoucher(row, dateFilterLabel, row.paymentRecord);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-[11px] font-bold rounded-lg transition-colors shadow-2xs cursor-pointer"
+                                  title={`Descargar comprobante en PDF de ${row.cleaner}`}
+                                >
+                                  <Printer className="w-3 h-3 text-[#0B1D4A]" />
+                                  <span>PDF</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedCleaner(row.cleaner);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 hover:bg-[#FFB566] hover:text-[#0B1D4A] text-slate-700 text-[11px] font-bold rounded-lg transition-colors shadow-2xs cursor-pointer"
+                                >
+                                  <span>Ver Voucher</span>
+                                  <ChevronRight className="w-3 h-3" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );

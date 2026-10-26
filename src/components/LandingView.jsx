@@ -3,8 +3,9 @@ import {
   Sparkles, Shield, Clock, CheckCircle2, MessageCircle, ArrowRight,
   Star, Globe, Instagram, Building2, Home, RefreshCw, Layers,
   ShoppingBag, MapPin, ChevronRight, BadgeCheck, Check, Phone,
-  Eye, X
+  Eye, X, Mail, Send, Calendar, AlertCircle, Loader2, FileText
 } from 'lucide-react';
+import { saveInquiryToFirestore } from '../lib/firebase';
 
 export default function LandingView({ onGoToLogin }) {
   // Default language is English; when toggled to Spanish, 100% of the page switches to Spanish
@@ -21,6 +22,83 @@ export default function LandingView({ onGoToLogin }) {
   const [calcBedrooms, setCalcBedrooms] = useState('3');
   const [calcBathrooms, setCalcBathrooms] = useState('2');
   const [calcType, setCalcType] = useState('deepclean');
+
+  // Alternative Online Quote / Contact Form State (Propuesta #1 - Lead Capture)
+  const [formName, setFormName] = useState('');
+  const [formEmail, setFormEmail] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formCity, setFormCity] = useState('Toronto & GTA');
+  const [formDate, setFormDate] = useState('');
+  const [formNotes, setFormNotes] = useState('');
+  const [formContactPref, setFormContactPref] = useState('whatsapp');
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [formSubmittedFolio, setFormSubmittedFolio] = useState(null);
+  const [formError, setFormError] = useState('');
+
+  // Handle direct online quote submission to Cloud Firestore
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    setFormError('');
+
+    if (!formName.trim()) {
+      setFormError(lang === 'en' ? 'Please enter your full name.' : 'Por favor ingresa tu nombre completo.');
+      return;
+    }
+    if (!formPhone.trim() && !formEmail.trim()) {
+      setFormError(
+        lang === 'en'
+          ? 'Please enter either a phone number or email address so we can contact you.'
+          : 'Por favor ingresa un teléfono o correo electrónico para contactarte.'
+      );
+      return;
+    }
+
+    setFormSubmitting(true);
+    const folioCode = `WG-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const propLabel = (calcProperty === 'residence') ? (lang === 'en' ? 'Luxury Residence / Estate' : 'Residencia Privada / Casa de Lujo')
+      : (calcProperty === 'condo') ? (lang === 'en' ? 'Condo / Penthouse' : 'Condominio / Penthouse')
+      : (calcProperty === 'airbnb') ? (lang === 'en' ? 'Airbnb / Rental Property' : 'Airbnb / Renta Vacacional')
+      : (lang === 'en' ? 'Commercial / Boutique Office' : 'Oficina / Local Comercial');
+
+    const serviceLabel = (calcType === 'deepclean') ? (lang === 'en' ? 'Deep Clean & Restoration' : 'Limpieza Profunda & Detallado')
+      : (calcType === 'housekeeping') ? (lang === 'en' ? 'Regular Luxury Housekeeping' : 'Housekeeping Residencial Continuo')
+      : (calcType === 'turnover') ? (lang === 'en' ? 'Airbnb Turnover & Linen Reset' : 'Turnover Airbnb y Blancos')
+      : (lang === 'en' ? 'Move-In / Move-Out transformation' : 'Mudanza y Entrega de Llaves');
+
+    const inquiryData = {
+      folio: folioCode,
+      name: formName.trim(),
+      email: formEmail.trim(),
+      phone: formPhone.trim(),
+      city: formCity,
+      propertyType: propLabel,
+      bedrooms: calcBedrooms,
+      bathrooms: calcBathrooms,
+      serviceType: serviceLabel,
+      desiredDate: formDate || 'Flexible',
+      notes: formNotes.trim(),
+      contactPreference: formContactPref,
+      lang: lang,
+      status: 'nueva',
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await saveInquiryToFirestore(inquiryData);
+      setFormSubmittedFolio(inquiryData);
+      setFormNotes('');
+    } catch (err) {
+      console.error('Error saving quote inquiry:', err);
+      setFormError(
+        lang === 'en'
+          ? 'Unable to submit right now. Please try again or reach our team via WhatsApp.'
+          : 'No se pudo enviar en este momento. Inténtalo de nuevo o contáctanos por WhatsApp.'
+      );
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
 
   // WhatsApp Configuration
   const phone = '14168840601';
@@ -175,7 +253,6 @@ export default function LandingView({ onGoToLogin }) {
       ctaButton: 'Chat with Operations on WhatsApp →',
       instagramFollow: 'Follow @whitegloveps on Instagram',
       servingCountries: 'Serving Canada, the United States, and Mexico.',
-      copyrightText: '© 2026 WhiteGlove Professional Services. All Rights Reserved.',
       navAbout: 'About',
       navServices: 'Services',
       navEstimate: 'Estimate',
@@ -183,6 +260,28 @@ export default function LandingView({ onGoToLogin }) {
       navAreas: 'Locations',
       navReviews: 'Reviews',
       navContact: 'Contact',
+      fillOnlineFormCta: 'Or Request Online (No WhatsApp Needed) ↓',
+      formOverline: 'Alternative Web Request',
+      formTitle: 'Request a Formal Online Estimate',
+      formSubtitle: 'No WhatsApp required. Enter your property details and our operations desk will prepare a personalized proposal.',
+      formNameLabel: 'Full Name *',
+      formEmailLabel: 'Email Address *',
+      formPhoneLabel: 'Phone / WhatsApp *',
+      formCityLabel: 'Operational Hub / City *',
+      formDateLabel: 'Tentative Service Date',
+      formNotesLabel: 'Special Instructions, Property Access or Requirements',
+      formNotesPlaceholder: 'e.g., Square footage, pet details, key lockbox code, high-ceiling windows...',
+      formPrefContact: 'Preferred Way to Receive Quote',
+      formPrefWhatsapp: 'WhatsApp Chat',
+      formPrefEmail: 'Email PDF / Summary',
+      formPrefPhone: 'Phone Call',
+      formSubmitBtn: 'Submit Quote Request to WhiteGlove',
+      formSubmittingText: 'Registering your request...',
+      formSuccessTitle: 'Quote Request Registered Successfully!',
+      formSuccessSubtitle: 'Your request has been routed to our operations team. You will be contacted within 2 business hours.',
+      formFolioLabel: 'Official Tracking Folio',
+      formSendFolioWa: 'Send Folio via WhatsApp Now',
+      formSubmitAnother: 'Submit Another Inquiry',
     },
     es: {
       tagline: 'Limpieza profesional. Cuidado excepcional.',
@@ -283,7 +382,6 @@ export default function LandingView({ onGoToLogin }) {
       ctaButton: 'Hablar con Operaciones por WhatsApp →',
       instagramFollow: 'Seguir a @whitegloveps en Instagram',
       servingCountries: 'Sirviendo Canadá, Estados Unidos y México.',
-      copyrightText: '© 2026 WhiteGlove Professional Services. Todos los Derechos Reservados.',
       navAbout: 'Nosotros',
       navServices: 'Servicios',
       navEstimate: 'Cotizar',
@@ -291,6 +389,28 @@ export default function LandingView({ onGoToLogin }) {
       navAreas: 'Sedes',
       navReviews: 'Testimonios',
       navContact: 'Contacto',
+      fillOnlineFormCta: 'O Solicitar en Línea Sin WhatsApp ↓',
+      formOverline: 'Solicitud Web Directa',
+      formTitle: 'Solicita una Cotización en Línea',
+      formSubtitle: 'Sin necesidad de WhatsApp. Registra los requerimientos de tu propiedad y nuestro equipo de operaciones te enviará una propuesta formal.',
+      formNameLabel: 'Nombre Completo *',
+      formEmailLabel: 'Correo Electrónico *',
+      formPhoneLabel: 'Teléfono o Celular *',
+      formCityLabel: 'Sede Operativa / Ciudad *',
+      formDateLabel: 'Fecha Tentativa de Servicio',
+      formNotesLabel: 'Detalles Especiales, Acceso a la Propiedad o Requerimientos',
+      formNotesPlaceholder: 'Ej: Metros cuadrados, mascotas, código de entrada o locker, ventanales altos...',
+      formPrefContact: 'Forma Preferida de Contacto',
+      formPrefWhatsapp: 'Mensaje de WhatsApp',
+      formPrefEmail: 'Envío de Cotización por Correo',
+      formPrefPhone: 'Llamada Telefónica',
+      formSubmitBtn: 'Enviar Solicitud a WhiteGlove',
+      formSubmittingText: 'Registrando tu solicitud...',
+      formSuccessTitle: '¡Solicitud Registrada con Éxito!',
+      formSuccessSubtitle: 'Tu requerimiento ha sido canalizado a nuestra coordinación operativa. Te contactaremos en menos de 2 horas hábiles.',
+      formFolioLabel: 'Folio Oficial de Seguimiento',
+      formSendFolioWa: 'Enviar Folio por WhatsApp Ahora',
+      formSubmitAnother: 'Enviar Otra Solicitud',
     }
   };
 
@@ -940,15 +1060,25 @@ export default function LandingView({ onGoToLogin }) {
                 </span>
               </div>
 
-              <a
-                href={`https://wa.me/${phone}?text=${getCustomizedQuoteMsg()}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-[#FFB566] hover:bg-[#E89A45] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98] whitespace-nowrap"
-              >
-                <MessageCircle className="w-4 h-4 fill-current" />
-                <span>{t.requestCalculatedQuote}</span>
-              </a>
+              <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+                <a
+                  href={`https://wa.me/${phone}?text=${getCustomizedQuoteMsg()}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-[#FFB566] hover:bg-[#E89A45] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98] whitespace-nowrap"
+                >
+                  <MessageCircle className="w-4 h-4 fill-current" />
+                  <span>{t.requestCalculatedQuote}</span>
+                </a>
+
+                <a
+                  href="#quote-form"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white border border-slate-300 hover:border-[#0B1D4A] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-xs transition-all active:scale-[0.98] whitespace-nowrap"
+                >
+                  <FileText className="w-4 h-4 text-[#0B1D4A]" />
+                  <span>{t.fillOnlineFormCta}</span>
+                </a>
+              </div>
             </div>
 
           </div>
@@ -1174,6 +1304,276 @@ export default function LandingView({ onGoToLogin }) {
               </div>
             ))}
           </div>
+
+        </div>
+      </section>
+
+      {/* 8.5 ALTERNATIVE ONLINE CONTACT / QUOTE REQUEST FORM (PROPUESTA #1 - LEAD CAPTURE) */}
+      <section id="quote-form" className="py-20 bg-[#FBF9F5] border-b border-slate-200/80 scroll-mt-12">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
+          
+          <div className="text-center max-w-2xl mx-auto space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0B1D4A] text-[#FFB566] text-[10px] font-bold tracking-widest uppercase shadow-xs">
+              <Sparkles className="w-3.5 h-3.5 text-[#FFB566]" />
+              <span>{t.formOverline}</span>
+            </div>
+            <h2 className="font-serif text-3xl sm:text-4xl font-medium text-[#0B1D4A]">
+              {t.formTitle}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+              {t.formSubtitle}
+            </p>
+          </div>
+
+          {formSubmittedFolio ? (
+            /* Luxury Success Confirmation Card with Official Folio */
+            <div className="bg-white rounded-3xl border border-emerald-200/80 p-8 sm:p-10 shadow-xl space-y-6 animate-in fade-in zoom-in-95 duration-200">
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-7 h-7 stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <h3 className="font-serif font-bold text-xl text-[#0B1D4A]">
+                      {t.formSuccessTitle}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {t.formSuccessSubtitle}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-[#FAF7F1] border border-amber-200/80 px-4 py-3 rounded-2xl text-center sm:text-right">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                    {t.formFolioLabel}
+                  </span>
+                  <span className="font-mono font-bold text-lg text-[#0B1D4A] tracking-wider block">
+                    {formSubmittedFolio.folio}
+                  </span>
+                </div>
+              </div>
+
+              {/* Submitted Details Summary Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-[#FBF9F5] p-5 rounded-2xl text-xs">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Cliente</span>
+                  <span className="font-bold text-[#0B1D4A] text-sm block mt-0.5">{formSubmittedFolio.name}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Sede / Ubicación</span>
+                  <span className="font-semibold text-slate-700 block mt-0.5">{formSubmittedFolio.city}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Tipo & Dimensiones</span>
+                  <span className="font-semibold text-slate-700 block mt-0.5">
+                    {formSubmittedFolio.propertyType} ({formSubmittedFolio.bedrooms}R / {formSubmittedFolio.bathrooms}B)
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Servicio Solicitado</span>
+                  <span className="font-semibold text-[#0B1D4A] block mt-0.5">{formSubmittedFolio.serviceType}</span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+                <a
+                  href={`https://wa.me/${phone}?text=${encodeURIComponent(
+                    lang === 'en'
+                      ? `Hi WhiteGlove! I just submitted an online quote request with Folio ${formSubmittedFolio.folio} for my ${formSubmittedFolio.propertyType} in ${formSubmittedFolio.city}.`
+                      : `¡Hola WhiteGlove! Acabo de enviar una solicitud de cotización en línea con el Folio ${formSubmittedFolio.folio} para mi ${formSubmittedFolio.propertyType} en ${formSubmittedFolio.city}.`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+                >
+                  <MessageCircle className="w-4 h-4 fill-current" />
+                  <span>{t.formSendFolioWa}</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => setFormSubmittedFolio(null)}
+                  className="w-full sm:w-auto px-5 py-3 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                >
+                  {t.formSubmitAnother}
+                </button>
+              </div>
+
+            </div>
+          ) : (
+            /* High-Intent Online Form */
+            <form
+              onSubmit={handleFormSubmit}
+              className="bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-10 shadow-xl space-y-6"
+            >
+              {formError && (
+                <div className="flex items-center gap-2 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              {/* Row 1: Name, Email & Phone */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    {t.formNameLabel}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder={lang === 'en' ? 'e.g. Eleanor Vance' : 'Ej: Lic. Elena Morales'}
+                    className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    {t.formEmailLabel}
+                  </label>
+                  <input
+                    type="email"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    placeholder={lang === 'en' ? 'client@residence.com' : 'contacto@empresa.com'}
+                    className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    {t.formPhoneLabel}
+                  </label>
+                  <input
+                    type="tel"
+                    value={formPhone}
+                    onChange={(e) => setFormPhone(e.target.value)}
+                    placeholder={lang === 'en' ? '+1 (416) 000-0000' : '+52 33 0000 0000'}
+                    className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A]"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: Operational Hub, Tentative Date & Preferred Contact */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    {t.formCityLabel}
+                  </label>
+                  <select
+                    value={formCity}
+                    onChange={(e) => setFormCity(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A] cursor-pointer"
+                  >
+                    <option value="Toronto & GTA">Toronto & GTA (Ontario, CA)</option>
+                    <option value="Hamilton">Hamilton (Ontario, CA)</option>
+                    <option value="Seattle">Seattle (Washington, US)</option>
+                    <option value="Guadalajara">Guadalajara (Jalisco, MX)</option>
+                    <option value="Otra Región">Otra Región / Por Confirmar</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    {t.formDateLabel}
+                  </label>
+                  <input
+                    type="date"
+                    value={formDate}
+                    onChange={(e) => setFormDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A] cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    {t.formPrefContact}
+                  </label>
+                  <select
+                    value={formContactPref}
+                    onChange={(e) => setFormContactPref(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A] cursor-pointer"
+                  >
+                    <option value="whatsapp">{t.formPrefWhatsapp}</option>
+                    <option value="email">{t.formPrefEmail}</option>
+                    <option value="phone">{t.formPrefPhone}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Property Scope Synchronization Indicator */}
+              <div className="bg-[#FAF7F1] border border-amber-200/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                    {lang === 'en' ? 'Configured from Estimator' : 'Configuración de Propiedad (Sincronizada del Estimador)'}
+                  </span>
+                  <span className="font-serif font-bold text-sm text-[#0B1D4A] block mt-0.5">
+                    {calcProperty === 'residence' ? (lang === 'en' ? 'Luxury Residence' : 'Residencia Privada') :
+                     calcProperty === 'condo' ? (lang === 'en' ? 'Condo / Penthouse' : 'Condominio') :
+                     calcProperty === 'airbnb' ? 'Airbnb' :
+                     (lang === 'en' ? 'Commercial' : 'Oficina / Comercial')} · {calcBedrooms} {lang === 'en' ? (calcBedrooms === '1' ? 'Bed' : 'Beds') : (calcBedrooms === '1' ? 'Recámara' : 'Recámaras')} · {calcBathrooms} {lang === 'en' ? (calcBathrooms === '1' ? 'Bath' : 'Baths') : (calcBathrooms === '1' ? 'Baño' : 'Baños')} · {
+                       calcType === 'deepclean' ? (lang === 'en' ? 'Deep Clean' : 'Limpieza Profunda') :
+                       calcType === 'housekeeping' ? (lang === 'en' ? 'Housekeeping' : 'Housekeeping') :
+                       calcType === 'turnover' ? (lang === 'en' ? 'Airbnb Turnover' : 'Turnover Airbnb') :
+                       (lang === 'en' ? 'Move-In/Out' : 'Mudanza')
+                     }
+                  </span>
+                </div>
+
+                <a
+                  href="#calculator"
+                  className="text-[11px] font-bold text-[#E89A45] hover:text-[#0B1D4A] underline transition-colors whitespace-nowrap self-start sm:self-auto"
+                >
+                  {lang === 'en' ? 'Change in Calculator ↑' : 'Modificar en el Estimador ↑'}
+                </a>
+              </div>
+
+              {/* Row 3: Special Notes */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  {t.formNotesLabel}
+                </label>
+                <textarea
+                  rows={3}
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder={t.formNotesPlaceholder}
+                  className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A] resize-none"
+                />
+              </div>
+
+              {/* Submit Button & Privacy Note */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-slate-100">
+                <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{lang === 'en' ? 'Your property details are kept strictly confidential.' : 'Tus datos son confidenciales y están protegidos.'}</span>
+                </span>
+
+                <button
+                  type="submit"
+                  disabled={formSubmitting}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-[#0B1D4A] hover:bg-[#1E3670] text-[#FFB566] font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-60"
+                >
+                  {formSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-[#FFB566]" />
+                      <span>{t.formSubmittingText}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4 text-[#FFB566]" />
+                      <span>{t.formSubmitBtn}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+            </form>
+          )}
 
         </div>
       </section>
