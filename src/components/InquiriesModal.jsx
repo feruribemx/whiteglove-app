@@ -268,6 +268,30 @@ export default function InquiriesModal({
                     </div>
                   </div>
 
+                  {/* Property Address Bar (To anticipate travel distance) */}
+                  {inq.address && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-indigo-50/70 border border-indigo-200/80 rounded-xl p-3 text-xs">
+                      <div className="flex items-start gap-2">
+                        <MapPin className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-indigo-950 block text-[11px] uppercase tracking-wider">
+                            Dirección de la Propiedad (Anticipar Distancia):
+                          </span>
+                          <span className="font-semibold text-slate-800">{inq.address}</span>
+                        </div>
+                      </div>
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${inq.address} ${inq.city || ''}`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 rounded-lg font-bold text-[11px] transition-colors shrink-0 self-start sm:self-center"
+                      >
+                        <span>Ver Distancia en Mapa</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                  )}
+
                   {/* Notes / Special Instructions if any */}
                   {inq.notes && (
                     <div className="text-xs bg-amber-50/50 border border-amber-200/60 rounded-xl p-3 text-slate-700">

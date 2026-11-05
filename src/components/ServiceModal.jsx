@@ -1,27 +1,36 @@
 import React, { useState, useEffect } from 'react';
 import {
   X, Plus, Trash2, DollarSign, Clock, User, Building2, AlertCircle, Ban,
-  CheckCircle2, RotateCcw, Sparkles, Copy, RefreshCw, BookmarkCheck
+  CheckCircle2, RotateCcw, Sparkles, Copy, RefreshCw, BookmarkCheck, Sliders
 } from 'lucide-react';
 import { hasFullAccess, canManagePagos, isSupervisorFerCastil } from '../lib/auth';
 import { TYPES } from '../lib/supabase';
 import { resolveClientMemory, saveClientMemory } from '../lib/clientMemory';
+import {
+  getSavedRatesConfig,
+  resolveCleanerHourlyRate,
+  resolveClientHourlyRate
+} from '../lib/ratesConfig';
 
 export default function ServiceModal({
   isOpen,
   onClose,
   serviceToEdit,
   onSave,
+  onDeleteService,
   onAddClient,
   onOpenAddCleaner,
+  onOpenRatesConfig,
   availableUnits = [],
   availableCleaners = [],
   rates,
+  ratesConfig,
   currentUser,
   services = [],
   clientMemory = null,
 }) {
   const showFinancials = hasFullAccess(currentUser);
+  const activeRatesConfig = ratesConfig || getSavedRatesConfig();
   const canEditPay = canManagePagos(currentUser);
   const isSupervisorFer = isSupervisorFerCastil(currentUser);
   const isCleaner = currentUser?.role === 'cleaner';
@@ -72,11 +81,14 @@ export default function ServiceModal({
     return parseFloat((hours + mins / 60).toFixed(2));
   };
 
-  // Default suggested pay rate calculation
-  const getRateForCleaner = (cleanerName) => {
-    if (ratesPorCleaner[cleanerName]) return Number(ratesPorCleaner[cleanerName]);
-    const r = rates?.[tipo];
-    return r?.amount ? Number(r.amount) : 18;
+  // Default suggested pay rate calculation using Cleaner + Client rules
+  const getRateForCleaner = (cleanerName, targetUnit = unidad, currentRatesMap = ratesPorCleaner) => {
+    const fallback = Number(rates?.[tipo]?.amount) || 20;
+    const configured = resolveCleanerHourlyRate(cleanerName, targetUnit, activeRatesConfig, fallback);
+    if (currentRatesMap && currentRatesMap[cleanerName] != null && currentRatesMap[cleanerName] !== '') {
+      return Number(currentRatesMap[cleanerName]);
+    }
+    return configured;
   };
 
   useEffect(() => {
@@ -111,14 +123,22 @@ export default function ServiceModal({
       setPagoCleaner(serviceToEdit.pagoCleaner != null ? String(serviceToEdit.pagoCleaner) : '');
       setPagoCleaningTeam(serviceToEdit.pagoCleaningTeam != null ? String(serviceToEdit.pagoCleaningTeam) : '');
       setTip(serviceToEdit.tip != null ? String(serviceToEdit.tip) : '');
-      setRatesPorCleaner(serviceToEdit.ratesPorCleaner || {});
+
+      const fallbackRate = Number(rates?.[serviceToEdit.tipo || 'Limpieza']?.amount) || 20;
+      const loadedRates = { ...(serviceToEdit.ratesPorCleaner || {}) };
+      cls.forEach((cl) => {
+        if (!loadedRates[cl]) {
+          loadedRates[cl] = resolveCleanerHourlyRate(cl, selectedUnit, activeRatesConfig, fallbackRate);
+        }
+      });
+      setRatesPorCleaner(loadedRates);
       setPagosPorCleaner(serviceToEdit.pagosPorCleaner || {});
       setCapturista(serviceToEdit.capturista || loggedCleanerName);
 
       const mem = resolveClientMemory(selectedUnit, services, clientMemory);
       setMemoryInfo(mem);
 
-      if (serviceToEdit.isDuplicate) {
+      if (serviceToEdit.isDuplicate && showFinancials) {
         setAutofillBanner(
           `Servicio duplicado para "${selectedUnit}". Cargo al cliente de $${serviceToEdit.cobro || 0} CAD y datos cargados en automático.`
         );
@@ -151,55 +171,86 @@ export default function ServiceModal({
       setTip(prefill?.tip != null ? String(prefill.tip) : '');
       setCapturista(currentUser?.displayName || currentUser?.username || loggedCleanerName || 'WhiteGlove');
 
-      // Automatic memory recall for default client
+      // Automatic memory recall & hourly rate for default client
       const mem = resolveClientMemory(initialUnit, services, clientMemory);
       setMemoryInfo(mem);
+      const clientHrRate = resolveClientHourlyRate(initialUnit, activeRatesConfig);
 
-      if (mem && mem.cobro != null && mem.cobro > 0) {
+      let initialWhole = 2;
+      let initialMins = 0;
+
+      if (mem && mem.horas) {
+        initialWhole = Math.floor(mem.horas || 2);
+        initialMins = Math.round(((mem.horas || 2) - initialWhole) * 60);
+      } else if (prefill?.horas) {
+        const prefH = Number(prefill.horas) || 2;
+        initialWhole = Math.floor(prefH);
+        initialMins = Math.round((prefH - initialWhole) * 60);
+      }
+      setHorasEnteras(initialWhole);
+      setMinutos(initialMins);
+      const initDecimalHours = computeDecimalHours(initialWhole, initialMins) || 2;
+
+      if (clientHrRate != null && clientHrRate > 0) {
+        const calcCobro = parseFloat((clientHrRate * initDecimalHours).toFixed(2));
+        setCobro(String(calcCobro));
+        setPagoCleaningTeam(mem?.pagoCleaningTeam ? String(mem.pagoCleaningTeam) : '');
+        setTipo(mem?.tipo || prefill?.tipo || 'Limpieza');
+        if (showFinancials) {
+          setAutofillBanner(`Tarifa por hora de $${clientHrRate}/hr CAD para "${initialUnit}" aplicada (${initDecimalHours}h = $${calcCobro} CAD).`);
+        } else {
+          setAutofillBanner(null);
+        }
+      } else if (mem && mem.cobro != null && mem.cobro > 0) {
         setCobro(String(mem.cobro));
         setPagoCleaningTeam(mem.pagoCleaningTeam ? String(mem.pagoCleaningTeam) : '');
         setTipo(mem.tipo || 'Limpieza');
-        const whole = Math.floor(mem.horas || 2);
-        const mins = Math.round(((mem.horas || 2) - whole) * 60);
-        setHorasEnteras(whole);
-        setMinutos(mins);
-        setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${initialUnit}" cargada automáticamente desde memoria.`);
+        if (showFinancials) {
+          setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${initialUnit}" cargada automáticamente desde memoria.`);
+        } else {
+          setAutofillBanner(null);
+        }
       } else {
         setCobro(prefill?.cobro != null ? String(prefill.cobro) : '');
         setPagoCleaningTeam('');
         setTipo(prefill?.tipo || 'Limpieza');
-        const prefH = Number(prefill?.horas) || 2;
-        setHorasEnteras(Math.floor(prefH));
-        setMinutos(Math.round((prefH - Math.floor(prefH)) * 60));
         setAutofillBanner(null);
       }
 
-      setPagoCleaner('');
-      const defaultRate = rates?.['Limpieza']?.amount || 18;
+      const defaultRate = rates?.['Limpieza']?.amount || 20;
       const initialRates = {};
       const initialPagos = {};
       targetCleaners.forEach((cl) => {
-        initialRates[cl] = defaultRate;
-        initialPagos[cl] = defaultRate * 2;
+        const resolvedRate = resolveCleanerHourlyRate(cl, initialUnit, activeRatesConfig, defaultRate);
+        initialRates[cl] = resolvedRate;
+        initialPagos[cl] = parseFloat((resolvedRate * initDecimalHours).toFixed(2));
       });
       setRatesPorCleaner(initialRates);
       setPagosPorCleaner(initialPagos);
+      const totalP = Object.values(initialPagos).reduce((s, v) => s + (Number(v) || 0), 0);
+      setPagoCleaner(String(parseFloat(totalP.toFixed(2))));
     }
     setValidationError('');
     setIsSubmitting(false);
-  }, [serviceToEdit, isOpen, isCleaner, loggedCleanerName, isSupervisorFer, availableUnits, services]);
+  }, [serviceToEdit, isOpen, isCleaner, loggedCleanerName, isSupervisorFer, availableUnits, services, ratesConfig]);
 
-  // Recalculate suggested pay when cleaners or duration changes
-  const updatePayForCleaners = (cleanersList, h, m) => {
+  // Recalculate suggested pay when cleaners, unit, or duration changes
+  const updatePayForCleaners = (cleanersList, h, m, targetUnit = unidad, customRatesMap = null) => {
     const totalDecimal = computeDecimalHours(h, m);
+    const fallbackRate = Number(rates?.[tipo]?.amount) || 20;
+    const nextRates = {};
     const nextPagos = {};
     cleanersList.forEach(cl => {
-      const rate = getRateForCleaner(cl);
+      const rate = customRatesMap && customRatesMap[cl] != null
+        ? Number(customRatesMap[cl])
+        : resolveCleanerHourlyRate(cl, targetUnit, activeRatesConfig, fallbackRate);
+      nextRates[cl] = rate;
       nextPagos[cl] = parseFloat((rate * totalDecimal).toFixed(2));
     });
+    setRatesPorCleaner(nextRates);
     setPagosPorCleaner(nextPagos);
     const totalP = Object.values(nextPagos).reduce((s, v) => s + (Number(v) || 0), 0);
-    setPagoCleaner(String(totalP));
+    setPagoCleaner(String(parseFloat(totalP.toFixed(2))));
   };
 
   const handleCleanerToggle = (cleanerName) => {
@@ -212,58 +263,92 @@ export default function ServiceModal({
       next = [...selectedCleaners, cleanerName];
     }
     setSelectedCleaners(next);
-
-    const nextRates = { ...ratesPorCleaner };
-    next.forEach(cl => {
-      if (!nextRates[cl]) nextRates[cl] = rates?.[tipo]?.amount || 18;
-    });
-    setRatesPorCleaner(nextRates);
-    updatePayForCleaners(next, horasEnteras, minutos);
+    updatePayForCleaners(next, horasEnteras, minutos, unidad, null);
   };
 
   const handleDurationChange = (newH, newM) => {
     setHorasEnteras(newH);
     setMinutos(newM);
-    updatePayForCleaners(selectedCleaners, newH, newM);
+    const totalDecimal = computeDecimalHours(newH, newM);
+    updatePayForCleaners(selectedCleaners, newH, newM, unidad, ratesPorCleaner);
+
+    // Also auto-update client charge if this client has a configured hourly billing rate
+    const clientHrRate = resolveClientHourlyRate(unidad, activeRatesConfig);
+    if (clientHrRate != null && clientHrRate > 0) {
+      const calcCobro = parseFloat((clientHrRate * totalDecimal).toFixed(2));
+      setCobro(String(calcCobro));
+    }
+  };
+
+  const handleCustomCleanerRate = (cleanerName, newRateVal) => {
+    const rateNum = Number(newRateVal) || 0;
+    const nextRates = { ...ratesPorCleaner, [cleanerName]: rateNum };
+    setRatesPorCleaner(nextRates);
+    const totalDecimal = computeDecimalHours(horasEnteras, minutos);
+    const nextPagos = {
+      ...pagosPorCleaner,
+      [cleanerName]: parseFloat((rateNum * totalDecimal).toFixed(2))
+    };
+    setPagosPorCleaner(nextPagos);
+    const totalP = Object.values(nextPagos).reduce((s, v) => s + (Number(v) || 0), 0);
+    setPagoCleaner(String(parseFloat(totalP.toFixed(2))));
   };
 
   const handleCustomCleanerPay = (cleanerName, amount) => {
     const nextPagos = { ...pagosPorCleaner, [cleanerName]: Number(amount) };
     setPagosPorCleaner(nextPagos);
     const totalP = Object.values(nextPagos).reduce((s, v) => s + (Number(v) || 0), 0);
-    setPagoCleaner(String(totalP));
+    setPagoCleaner(String(parseFloat(totalP.toFixed(2))));
   };
 
   const handleUnitSelect = (newUnit) => {
     setUnidad(newUnit);
-    // When creating a new service or duplicating, auto-populate from client memory
+    const mem = resolveClientMemory(newUnit, services, clientMemory);
+    setMemoryInfo(mem);
+    const clientHrRate = resolveClientHourlyRate(newUnit, activeRatesConfig);
+
+    let nextWhole = horasEnteras;
+    let nextMins = minutos;
+
     if (!serviceToEdit || serviceToEdit.isDuplicate) {
-      const mem = resolveClientMemory(newUnit, services, clientMemory);
-      setMemoryInfo(mem);
-      if (mem && mem.cobro != null && mem.cobro > 0) {
-        setCobro(String(mem.cobro));
-        if (mem.pagoCleaningTeam > 0) {
-          setPagoCleaningTeam(String(mem.pagoCleaningTeam));
-        } else {
-          setPagoCleaningTeam('');
-        }
-        if (mem.tipo) setTipo(mem.tipo);
-        if (mem.horas) {
-          const whole = Math.floor(mem.horas);
-          const mins = Math.round((mem.horas - whole) * 60);
-          setHorasEnteras(whole);
-          setMinutos(mins);
-          updatePayForCleaners(selectedCleaners, whole, mins);
-        }
-        setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${newUnit}" cargada automáticamente desde memoria.`);
+      if (mem && mem.horas) {
+        nextWhole = Math.floor(mem.horas);
+        nextMins = Math.round((mem.horas - nextWhole) * 60);
+        setHorasEnteras(nextWhole);
+        setMinutos(nextMins);
+      }
+      if (mem && mem.tipo) setTipo(mem.tipo);
+      if (mem && mem.pagoCleaningTeam > 0) {
+        setPagoCleaningTeam(String(mem.pagoCleaningTeam));
       } else {
-        setCobro('');
         setPagoCleaningTeam('');
+      }
+    }
+
+    const totalDecimal = computeDecimalHours(nextWhole, nextMins);
+
+    // Always recalculate cleaner hourly pay according to the new client (e.g. Mafer + Georgia = 23.50/hr, Mafer + Max = 20/hr)
+    updatePayForCleaners(selectedCleaners, nextWhole, nextMins, newUnit, null);
+
+    // Recalculate client charge based on hourly rate or client memory
+    if (clientHrRate != null && clientHrRate > 0) {
+      const calcCobro = parseFloat((clientHrRate * totalDecimal).toFixed(2));
+      setCobro(String(calcCobro));
+      if (showFinancials) {
+        setAutofillBanner(`Tarifa por hora de $${clientHrRate}/hr CAD para "${newUnit}" aplicada (${totalDecimal}h = $${calcCobro} CAD).`);
+      } else {
         setAutofillBanner(null);
       }
-    } else {
-      const mem = resolveClientMemory(newUnit, services, clientMemory);
-      setMemoryInfo(mem);
+    } else if ((!serviceToEdit || serviceToEdit.isDuplicate) && mem && mem.cobro != null && mem.cobro > 0) {
+      setCobro(String(mem.cobro));
+      if (showFinancials) {
+        setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${newUnit}" cargada automáticamente desde memoria.`);
+      } else {
+        setAutofillBanner(null);
+      }
+    } else if (!serviceToEdit || serviceToEdit.isDuplicate) {
+      setCobro('');
+      setAutofillBanner(null);
     }
   };
 
@@ -458,7 +543,9 @@ export default function ServiceModal({
                     Memoria Aplicada: Cliente Recurrente "{unidad}"
                   </span>
                   <span className="text-[11px] text-sky-800">
-                    Cargo al cliente de ${cobro || 0} CAD, horas y datos cargados en automático para esta nueva fecha.
+                    {showFinancials
+                      ? `Cargo al cliente de $${cobro || 0} CAD, horas y datos cargados en automático para esta nueva fecha.`
+                      : 'Horas y datos del turno cargados en automático para esta nueva fecha.'}
                   </span>
                 </div>
               </div>
@@ -615,39 +702,61 @@ export default function ServiceModal({
               </select>
             )}
 
-            {/* Client Memory & Recurrence Info Badge */}
-            {memoryInfo && memoryInfo.cobro > 0 ? (
-              <div className="mt-2 flex items-center justify-between text-[11px] bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                <div className="flex items-center gap-1.5 text-slate-700 flex-wrap">
-                  <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="font-bold text-slate-900">Cliente Recurrente:</span>
-                  <span>Tarifa en memoria <strong className="text-emerald-700 font-bold">${memoryInfo.cobro} CAD</strong></span>
-                  {memoryInfo.totalServices > 0 && (
-                    <span className="text-slate-500">
-                      ({memoryInfo.totalServices} {memoryInfo.totalServices === 1 ? 'servicio' : 'servicios'})
-                    </span>
+            {/* Client Memory & Recurrence Info Badge (Strictly guarded by showFinancials) */}
+            {showFinancials && (
+              memoryInfo && memoryInfo.cobro > 0 ? (
+                <div className="mt-2 flex items-center justify-between text-[11px] bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-1.5 text-slate-700 flex-wrap">
+                    <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="font-bold text-slate-900">Cliente Recurrente:</span>
+                    {resolveClientHourlyRate(unidad, activeRatesConfig) ? (
+                      <span>
+                        Tarifa por hora <strong className="text-emerald-700 font-bold">${resolveClientHourlyRate(unidad, activeRatesConfig)}/hr CAD</strong>
+                      </span>
+                    ) : (
+                      <span>
+                        Tarifa en memoria <strong className="text-emerald-700 font-bold">${memoryInfo.cobro} CAD</strong>
+                      </span>
+                    )}
+                    {memoryInfo.totalServices > 0 && (
+                      <span className="text-slate-500">
+                        ({memoryInfo.totalServices} {memoryInfo.totalServices === 1 ? 'servicio' : 'servicios'})
+                      </span>
+                    )}
+                  </div>
+                  {onOpenRatesConfig && (
+                    <button
+                      type="button"
+                      onClick={onOpenRatesConfig}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 hover:underline cursor-pointer ml-2 shrink-0"
+                    >
+                      <Sliders className="w-3 h-3" />
+                      <span>Tarifas $/hr</span>
+                    </button>
                   )}
                 </div>
-                {String(cobro) !== String(memoryInfo.cobro) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCobro(String(memoryInfo.cobro));
-                      setAutofillBanner(`Tarifa restablecida a $${memoryInfo.cobro} CAD.`);
-                    }}
-                    className="inline-flex items-center gap-1 text-[10px] font-bold text-[#0B1D4A] hover:underline cursor-pointer ml-2 shrink-0"
-                    title="Restablecer tarifa habitual recordada"
-                  >
-                    <RefreshCw className="w-3 h-3 text-[#0B1D4A]" />
-                    <span>Restablecer</span>
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500 px-1">
-                <Sparkles className="w-3 h-3 text-[#FFB566] shrink-0" />
-                <span>El cargo que registres se guardará en automático en la memoria de este cliente.</span>
-              </div>
+              ) : (
+                <div className="mt-1.5 flex items-center justify-between gap-1.5 text-[11px] text-slate-500 px-1">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-[#FFB566] shrink-0" />
+                    <span>
+                      {resolveClientHourlyRate(unidad, activeRatesConfig)
+                        ? `Cobro configurado: $${resolveClientHourlyRate(unidad, activeRatesConfig)}/hr CAD × ${totalDecimalHours}h`
+                        : 'El cargo que registres se guardará en automático en la memoria de este cliente.'}
+                    </span>
+                  </div>
+                  {onOpenRatesConfig && (
+                    <button
+                      type="button"
+                      onClick={onOpenRatesConfig}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 hover:underline cursor-pointer shrink-0"
+                    >
+                      <Sliders className="w-3 h-3" />
+                      <span>Configurar $/hr</span>
+                    </button>
+                  )}
+                </div>
+              )
             )}
           </div>
 
@@ -791,29 +900,63 @@ export default function ServiceModal({
             </div>
           </div>
 
-          {/* Individual Cleaner Pay Breakdown */}
+          {/* Individual Cleaner Pay Breakdown (with Hourly Rate $/h + Total Pay) */}
           {selectedCleaners.length > 0 && canEditPay && (
             <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
-              <span className="text-xs font-bold text-slate-700 block">
-                Desglose de Pago por Cleaner ({totalDecimalHours}h a tarifa asignada)
-              </span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-700 block">
+                  Pago por Hora y Total por Cleaner ({totalDecimalHours}h en {unidad || 'Cliente'})
+                </span>
+                {showFinancials && onOpenRatesConfig && (
+                  <button
+                    type="button"
+                    onClick={onOpenRatesConfig}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] font-bold transition-colors cursor-pointer"
+                  >
+                    <Sliders className="w-3 h-3" />
+                    <span>Configurar Tarifas $/hr</span>
+                  </button>
+                )}
+              </div>
               <div className="space-y-1.5">
-                {selectedCleaners.map((cl) => (
-                  <div key={cl} className="flex items-center justify-between gap-3 text-xs bg-white p-2 rounded-xl border border-slate-200">
-                    <span className="font-bold text-slate-800">{cl}</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-400 font-semibold">$</span>
-                      <input
-                        type="number"
-                        step="0.25"
-                        value={pagosPorCleaner[cl] ?? ''}
-                        onChange={(e) => handleCustomCleanerPay(cl, e.target.value)}
-                        className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-lg text-right font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-[#0B1D4A]"
-                      />
-                      <span className="text-[11px] text-slate-400 font-semibold">CAD</span>
+                {selectedCleaners.map((cl) => {
+                  const cleanerHrRate = ratesPorCleaner[cl] ?? resolveCleanerHourlyRate(cl, unidad, activeRatesConfig, 20);
+                  return (
+                    <div key={cl} className="flex flex-wrap items-center justify-between gap-2 text-xs bg-white p-2.5 rounded-xl border border-slate-200">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800">{cl}</span>
+                        <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-bold">
+                          ${cleanerHrRate}/hr × {totalDecimalHours}h
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* Hourly Rate input */}
+                        <div className="flex items-center gap-1" title="Pago por hora para este servicio">
+                          <span className="text-[10px] text-slate-400 font-bold">$/h:</span>
+                          <input
+                            type="number"
+                            step="0.25"
+                            value={cleanerHrRate}
+                            onChange={(e) => handleCustomCleanerRate(cl, e.target.value)}
+                            className="w-16 px-1.5 py-1 text-xs border border-indigo-200 bg-indigo-50/40 text-indigo-800 rounded-lg text-right font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                        {/* Total Pay input */}
+                        <div className="flex items-center gap-1" title="Pago total al cleaner por este servicio">
+                          <span className="text-slate-400 font-semibold">Total $</span>
+                          <input
+                            type="number"
+                            step="0.25"
+                            value={pagosPorCleaner[cl] ?? ''}
+                            onChange={(e) => handleCustomCleanerPay(cl, e.target.value)}
+                            className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-lg text-right font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-[#0B1D4A]"
+                          />
+                          <span className="text-[10px] text-slate-400 font-semibold">CAD</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -915,28 +1058,45 @@ export default function ServiceModal({
           </div>
 
           {/* Modal Actions */}
-          <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 font-bold text-slate-600 hover:text-slate-800 rounded-xl text-xs"
-            >
-              Cerrar
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-5 py-2 font-bold text-[#0B1D4A] bg-[#FFB566] hover:bg-[#E89A45] rounded-xl text-xs shadow-xs transition-all active:scale-98 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-            >
-              {isSubmitting ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#0B1D4A]" />
-                  <span>Guardando...</span>
-                </>
-              ) : (
-                <span>{isRealEdit ? 'Guardar Cambios' : 'Registrar Servicio'}</span>
+          <div className="pt-3 flex items-center justify-between gap-2 border-t border-slate-200">
+            <div>
+              {isRealEdit && showFinancials && onDeleteService && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onDeleteService(serviceToEdit.id);
+                  }}
+                  className="px-3.5 py-2 font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Eliminar Servicio</span>
+                </button>
               )}
-            </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 font-bold text-slate-600 hover:text-slate-800 rounded-xl text-xs"
+              >
+                Cerrar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-5 py-2 font-bold text-[#0B1D4A] bg-[#FFB566] hover:bg-[#E89A45] rounded-xl text-xs shadow-xs transition-all active:scale-98 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#0B1D4A]" />
+                    <span>Guardando...</span>
+                  </>
+                ) : (
+                  <span>{isRealEdit ? 'Guardar Cambios' : 'Registrar Servicio'}</span>
+                )}
+              </button>
+            </div>
           </div>
         </form>
 

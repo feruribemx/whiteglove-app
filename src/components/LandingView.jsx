@@ -28,6 +28,7 @@ export default function LandingView({ onGoToLogin }) {
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formCity, setFormCity] = useState('Toronto & GTA');
+  const [formAddress, setFormAddress] = useState('');
   const [formDate, setFormDate] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formContactPref, setFormContactPref] = useState('whatsapp');
@@ -42,6 +43,14 @@ export default function LandingView({ onGoToLogin }) {
 
     if (!formName.trim()) {
       setFormError(lang === 'en' ? 'Please enter your full name.' : 'Por favor ingresa tu nombre completo.');
+      return;
+    }
+    if (!formAddress.trim()) {
+      setFormError(
+        lang === 'en'
+          ? 'Please enter the property address or street/postal code so we can anticipate travel distance.'
+          : 'Por favor ingresa la dirección o ubicación de la propiedad para anticipar la distancia.'
+      );
       return;
     }
     if (!formPhone.trim() && !formEmail.trim()) {
@@ -72,6 +81,7 @@ export default function LandingView({ onGoToLogin }) {
       email: formEmail.trim(),
       phone: formPhone.trim(),
       city: formCity,
+      address: formAddress.trim(),
       propertyType: propLabel,
       bedrooms: calcBedrooms,
       bathrooms: calcBathrooms,
@@ -138,13 +148,16 @@ export default function LandingView({ onGoToLogin }) {
     const propertyText = (propLabels[lang] && propLabels[lang][calcProperty]) || calcProperty.toUpperCase();
     const serviceText = (typeLabels[lang] && typeLabels[lang][calcType]) || calcType.toUpperCase();
 
+    const addressPartEn = formAddress.trim() ? ` located at ${formAddress.trim()}` : '';
+    const addressPartEs = formAddress.trim() ? ` ubicada en ${formAddress.trim()}` : '';
+
     if (lang === 'en') {
       return encodeURIComponent(
-        `Hi WhiteGlove! I would like to request an estimate for a ${propertyText} with ${calcBedrooms} bedroom(s) and ${calcBathrooms} bathroom(s) (${serviceText}).`
+        `Hi WhiteGlove! I would like to request an estimate for a ${propertyText} with ${calcBedrooms} bedroom(s) and ${calcBathrooms} bathroom(s) (${serviceText})${addressPartEn}.`
       );
     }
     return encodeURIComponent(
-      `¡Hola WhiteGlove! Me gustaría solicitar una cotización para ${propertyText} de ${calcBedrooms} recámara(s) y ${calcBathrooms} baño(s) (${serviceText}).`
+      `¡Hola WhiteGlove! Me gustaría solicitar una cotización para ${propertyText} de ${calcBedrooms} recámara(s) y ${calcBathrooms} baño(s) (${serviceText})${addressPartEs}.`
     );
   };
 
@@ -158,7 +171,7 @@ export default function LandingView({ onGoToLogin }) {
       tagline: 'Professional Cleaning. Exceptional Care.',
       portalLogin: 'Client & Team Portal',
       heroTag: 'THE SUPREME STANDARD IN LUXURY CARE',
-      heroHeadline: 'Exceptional Spaces. Zero Compromise.',
+      heroHeadline: 'Exceptional Spaces. Impeccable Care.',
       heroSubhead: 'Precision residential cleaning, seamless Airbnb turnovers, and commercial property care delivered with 5-star hotel meticulousness.',
       guaranteeBadge: '100% Cleanliness Guarantee',
       vettedBadge: '100% Background-Checked & Uniformed Specialists',
@@ -268,6 +281,9 @@ export default function LandingView({ onGoToLogin }) {
       formEmailLabel: 'Email Address *',
       formPhoneLabel: 'Phone / WhatsApp *',
       formCityLabel: 'Operational Hub / City *',
+      formAddressLabel: 'Property Address (Street, Number & Postal Code) *',
+      formAddressPlaceholder: 'e.g., 120 Yorkville Ave, Toronto, ON M5R 1C2 (helps us estimate travel distance)',
+      calcAddressLabel: '5. Property Address / Location (To anticipate travel distance)',
       formDateLabel: 'Tentative Service Date',
       formNotesLabel: 'Special Instructions, Property Access or Requirements',
       formNotesPlaceholder: 'e.g., Square footage, pet details, key lockbox code, high-ceiling windows...',
@@ -287,7 +303,7 @@ export default function LandingView({ onGoToLogin }) {
       tagline: 'Limpieza profesional. Cuidado excepcional.',
       portalLogin: 'Acceso al Portal',
       heroTag: 'EL ESTÁNDAR SUPREMO EN CUIDADO RESIDENCIAL',
-      heroHeadline: 'Espacios excepcionales. Cero compromisos.',
+      heroHeadline: 'Espacios Excepcionales. Cuidado Impecable.',
       heroSubhead: 'Limpieza residencial de precisión, preparación impecable de Airbnb y cuidado comercial entregados con la meticulosidad de un hotel 5 estrellas.',
       guaranteeBadge: 'Garantía 100% de Calidad',
       vettedBadge: 'Personal 100% Verificado',
@@ -397,6 +413,9 @@ export default function LandingView({ onGoToLogin }) {
       formEmailLabel: 'Correo Electrónico *',
       formPhoneLabel: 'Teléfono o Celular *',
       formCityLabel: 'Sede Operativa / Ciudad *',
+      formAddressLabel: 'Dirección de la Propiedad (Calle, Número y C.P. para anticipar distancia) *',
+      formAddressPlaceholder: 'Ej: 120 Yorkville Ave, Toronto / Av. Patria 1500, Zapopan...',
+      calcAddressLabel: '5. Dirección o Ubicación de la Propiedad (Para anticipar distancia)',
       formDateLabel: 'Fecha Tentativa de Servicio',
       formNotesLabel: 'Detalles Especiales, Acceso a la Propiedad o Requerimientos',
       formNotesPlaceholder: 'Ej: Metros cuadrados, mascotas, código de entrada o locker, ventanales altos...',
@@ -1038,6 +1057,21 @@ export default function LandingView({ onGoToLogin }) {
               </div>
             </div>
 
+            {/* Step 5: Property Address to anticipate distance */}
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-[#E89A45]" />
+                <span>{t.calcAddressLabel}</span>
+              </label>
+              <input
+                type="text"
+                value={formAddress}
+                onChange={(e) => setFormAddress(e.target.value)}
+                placeholder={t.formAddressPlaceholder}
+                className="w-full px-4 py-3 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A]"
+              />
+            </div>
+
             {/* Summary & WhatsApp Dispatch */}
             <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#FBF9F5] p-5 rounded-2xl">
               <div>
@@ -1361,8 +1395,10 @@ export default function LandingView({ onGoToLogin }) {
                   <span className="font-bold text-[#0B1D4A] text-sm block mt-0.5">{formSubmittedFolio.name}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Sede / Ubicación</span>
-                  <span className="font-semibold text-slate-700 block mt-0.5">{formSubmittedFolio.city}</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Sede / Dirección</span>
+                  <span className="font-semibold text-slate-700 block mt-0.5">
+                    {formSubmittedFolio.address ? `${formSubmittedFolio.address} (${formSubmittedFolio.city})` : formSubmittedFolio.city}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Tipo & Dimensiones</span>
@@ -1381,8 +1417,8 @@ export default function LandingView({ onGoToLogin }) {
                 <a
                   href={`https://wa.me/${phone}?text=${encodeURIComponent(
                     lang === 'en'
-                      ? `Hi WhiteGlove! I just submitted an online quote request with Folio ${formSubmittedFolio.folio} for my ${formSubmittedFolio.propertyType} in ${formSubmittedFolio.city}.`
-                      : `¡Hola WhiteGlove! Acabo de enviar una solicitud de cotización en línea con el Folio ${formSubmittedFolio.folio} para mi ${formSubmittedFolio.propertyType} en ${formSubmittedFolio.city}.`
+                      ? `Hi WhiteGlove! I just submitted an online quote request with Folio ${formSubmittedFolio.folio} for my ${formSubmittedFolio.propertyType} at ${formSubmittedFolio.address || formSubmittedFolio.city}.`
+                      : `¡Hola WhiteGlove! Acabo de enviar una solicitud de cotización en línea con el Folio ${formSubmittedFolio.folio} para mi ${formSubmittedFolio.propertyType} en ${formSubmittedFolio.address || formSubmittedFolio.city}.`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -1503,6 +1539,22 @@ export default function LandingView({ onGoToLogin }) {
                     <option value="phone">{t.formPrefPhone}</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Row 2.5: Property Address (Required to anticipate travel distance) */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-[#E89A45]" />
+                  <span>{t.formAddressLabel}</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={formAddress}
+                  onChange={(e) => setFormAddress(e.target.value)}
+                  placeholder={t.formAddressPlaceholder}
+                  className="w-full px-3.5 py-2.5 bg-[#FBF9F5] border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]/20 focus:border-[#0B1D4A]"
+                />
               </div>
 
               {/* Property Scope Synchronization Indicator */}

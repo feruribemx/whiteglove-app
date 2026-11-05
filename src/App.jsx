@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Trash2, AlertTriangle, X } from 'lucide-react';
 import Navbar from './components/Navbar';
 import StatsCards from './components/StatsCards';
 import ServicesList from './components/ServicesList';
@@ -11,10 +12,12 @@ import AuditLogModal from './components/AuditLogModal';
 import AddCleanerModal from './components/AddCleanerModal';
 import SystemDiagnosticsModal from './components/SystemDiagnosticsModal';
 import InquiriesModal from './components/InquiriesModal';
+import RatesConfigModal from './components/RatesConfigModal';
 import LoginView from './components/LoginView';
 import LandingView from './components/LandingView';
 import Toast from './components/Toast';
 import { getSavedClientMemory, saveClientMemory } from './lib/clientMemory';
+import { getSavedRatesConfig, saveRatesConfig, mergeRatesConfig } from './lib/ratesConfig';
 
 import {
   supabase,
@@ -57,6 +60,7 @@ import {
   saveClientToFirestore,
   saveStockByUnitToFirestore,
   saveStockStorageToFirestore,
+  saveSettingToFirestore,
   saveAuditLogToFirestore,
   seedInitialFirestoreIfEmpty,
 } from './lib/firebase';
@@ -110,14 +114,27 @@ export default function App() {
   const [periodFilter, setPeriodFilter] = useState('all');
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState(null);
+  const [serviceToDelete, setServiceToDelete] = useState(null);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isAddCleanerModalOpen, setIsAddCleanerModalOpen] = useState(false);
   const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState(false);
+  const [isRatesConfigModalOpen, setIsRatesConfigModalOpen] = useState(false);
+  const [ratesConfig, setRatesConfig] = useState(() => getSavedRatesConfig());
   const [inquiries, setInquiries] = useState([]);
   const [isInquiriesModalOpen, setIsInquiriesModalOpen] = useState(false);
   const [clientMemory, setClientMemory] = useState(() => getSavedClientMemory());
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [previewLanding, setPreviewLanding] = useState(false);
+
+  const getDeletedServiceIds = () => {
+    try {
+      const raw = localStorage.getItem('wg_deleted_service_ids');
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch {
+      return new Set();
+    }
+  };
   const [portalLang, setPortalLang] = useState(() => {
     try {
       return localStorage.getItem('wg-portal-lang') || 'es';
@@ -195,7 +212,9 @@ export default function App() {
         ]);
 
         if (isMounted) {
-          if (svcs?.length) setServices(svcs);
+          const deletedSet = getDeletedServiceIds();
+          const filteredInitialSvcs = (svcs || []).filter((s) => !deletedSet.has(String(s.id)));
+          if (filteredInitialSvcs.length) setServices(filteredInitialSvcs);
           if (byUnit) setStockByUnit(byUnit);
           if (storage) setStockStorage(storage);
           if (ratesData) setRates(ratesData);
@@ -217,8 +236,12 @@ export default function App() {
 
     // Attach Realtime Listeners to Firebase Firestore (All devices sync live in real-time)
     const unsubServices = subscribeServices((liveServices) => {
-      if (liveServices && liveServices.length > 0) {
-        setServices(liveServices);
+      if (Array.isArray(liveServices)) {
+        const deletedSet = getDeletedServiceIds();
+        const activeLive = liveServices.filter((s) => !deletedSet.has(String(s.id)));
+        if (activeLive.length > 0 || liveServices.length === 0) {
+          setServices(activeLive);
+        }
       }
     });
 
@@ -274,6 +297,21 @@ export default function App() {
           setClientMemory(settingsMap.client_memory);
           try {
             localStorage.setItem('wg_client_memory', JSON.stringify(settingsMap.client_memory));
+          } catch {}
+        }
+        if (settingsMap.rates_config) {
+          const merged = mergeRatesConfig(settingsMap.rates_config);
+          setRatesConfig(merged);
+          try {
+            localStorage.setItem('wg_rates_config', JSON.stringify(merged));
+          } catch {}
+        }
+        if (Array.isArray(settingsMap.deleted_service_ids)) {
+          try {
+            const localSet = getDeletedServiceIds();
+            settingsMap.deleted_service_ids.forEach((id) => localSet.add(String(id)));
+            localStorage.setItem('wg_deleted_service_ids', JSON.stringify(Array.from(localSet)));
+            setServices((prev) => prev.filter((s) => !localSet.has(String(s.id))));
           } catch {}
         }
       }
@@ -439,22 +477,71 @@ export default function App() {
     );
   };
 
-  const handleDeleteService = async (id) => {
-    if (!window.confirm('¿Confirmas que deseas eliminar este servicio?')) return;
-    try {
-      await deleteServiceFromFirestore(id);
-      supabase.from('services').delete().eq('id', id).catch(() => {});
-      setServices((prev) => prev.filter((s) => String(s.id) !== String(id)));
-      addToast('Eliminado', 'El servicio ha sido removido.', 'info');
-      saveAuditLogToFirestore({
-        actor: currentUser?.displayName || currentUser?.username,
-        action: 'DELETE_SERVICE',
-        details: `Eliminó el servicio #${id}`,
-      });
-    } catch (err) {
-      console.error('Delete service error:', err);
-      addToast('Error', 'No se pudo eliminar el servicio.', 'error');
+  const handleDeleteService = (id) => {
+    if (!hasFullAccess(currentUser)) {
+      addToast('Acceso Restringido', 'Solo los administradores principales pueden eliminar servicios.', 'error');
+      return;
     }
+    const target = services.find((s) => String(s.id) === String(id));
+    setServiceToDelete(target || { id: String(id), unidad: 'Servicio seleccionado', fecha: '' });
+  };
+
+  const confirmDeleteService = async () => {
+    if (!serviceToDelete) return;
+    const sId = String(serviceToDelete.id);
+    const targetUnit = serviceToDelete.unidad || 'Unidad';
+    setServiceToDelete(null);
+
+    // 1. Optimistically remove from UI state immediately
+    setServices((prev) => prev.filter((s) => String(s.id) !== sId));
+
+    // 2. Track deleted ID in localStorage & Firestore settings so Supabase fallback never resurrects it
+    try {
+      const deletedSet = getDeletedServiceIds();
+      deletedSet.add(sId);
+      const deletedArr = Array.from(deletedSet);
+      localStorage.setItem('wg_deleted_service_ids', JSON.stringify(deletedArr));
+      saveSettingToFirestore('deleted_service_ids', deletedArr).catch(() => {});
+    } catch {}
+
+    // 3. Remove from offline localStorage cache
+    try {
+      const cached = JSON.parse(localStorage.getItem('wg-offline-services') || '[]');
+      const filteredCache = cached.filter((s) => String(s.id) !== sId);
+      localStorage.setItem('wg-offline-services', JSON.stringify(filteredCache));
+    } catch {}
+
+    // 4. Delete from Firestore and Supabase
+    try {
+      await deleteServiceFromFirestore(sId);
+    } catch (err) {
+      console.warn('Firestore delete notice:', err);
+    }
+    try {
+      supabase.from('services').delete().eq('id', sId).catch(() => {});
+    } catch {}
+
+    addToast('Servicio Eliminado', `El servicio en ${targetUnit} ha sido eliminado permanentemente.`, 'info');
+    try {
+      saveAuditLogToFirestore({
+        actor: currentUser?.displayName || currentUser?.username || 'Admin',
+        action: 'DELETE_SERVICE',
+        details: `Eliminó el servicio en ${targetUnit} (#${sId})`,
+      });
+    } catch {}
+  };
+
+  const handleSaveRatesConfig = (newConfig) => {
+    const saved = saveRatesConfig(newConfig);
+    setRatesConfig(saved);
+    addToast('Tarifas Actualizadas', 'Los pagos por hora a cleaners y cobros por hora a clientes se han guardado.');
+    try {
+      saveAuditLogToFirestore({
+        actor: currentUser?.displayName || currentUser?.username || 'Admin',
+        action: 'UPDATE_RATES_CONFIG',
+        details: 'Actualizó la configuración de pagos por hora a cleaners y tarifas por hora a clientes.',
+      });
+    } catch {}
   };
 
   // Inventory Management (Cloud Sync)
@@ -648,10 +735,11 @@ export default function App() {
         onLogout={handleLogout}
         onOpenNewService={handleOpenNewService}
         onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
-        onOpenAuditLog={() => setIsAuditModalOpen(true)}
-        onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)}
+        onOpenRatesConfig={showFinancials ? () => setIsRatesConfigModalOpen(true) : null}
+        onOpenAuditLog={showFinancials ? () => setIsAuditModalOpen(true) : null}
+        onOpenDiagnostics={showFinancials ? () => setIsDiagnosticsModalOpen(true) : null}
         onPreviewLanding={() => setPreviewLanding(true)}
-        onOpenInquiries={currentUser?.role === 'admin' ? () => setIsInquiriesModalOpen(true) : null}
+        onOpenInquiries={showFinancials ? () => setIsInquiriesModalOpen(true) : null}
         inquiriesCount={newInquiriesCount}
         lang={portalLang}
         setLang={handleSetPortalLang}
@@ -681,6 +769,7 @@ export default function App() {
             onDeleteService={hasFullAccess(currentUser) ? handleDeleteService : null}
             onOpenNewService={handleOpenNewService}
             onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
+            onOpenRatesConfig={showFinancials ? () => setIsRatesConfigModalOpen(true) : null}
           />
         )}
 
@@ -806,15 +895,99 @@ export default function App() {
           onClose={() => setIsServiceModalOpen(false)}
           serviceToEdit={serviceToEdit}
           onSave={handleSaveService}
+          onDeleteService={hasFullAccess(currentUser) ? handleDeleteService : null}
           onAddClient={handleAddClient}
           onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
+          onOpenRatesConfig={showFinancials ? () => setIsRatesConfigModalOpen(true) : null}
           availableUnits={availableUnits}
           availableCleaners={visibleCleaners}
           rates={rates}
+          ratesConfig={ratesConfig}
           currentUser={currentUser}
           services={visibleServices}
           clientMemory={clientMemory}
         />
+      )}
+
+      {/* Hourly Pay & Client Billing Rates Configuration Modal (Master Admins Only) */}
+      {isRatesConfigModalOpen && showFinancials && (
+        <RatesConfigModal
+          isOpen={isRatesConfigModalOpen}
+          onClose={() => setIsRatesConfigModalOpen(false)}
+          ratesConfig={ratesConfig}
+          onSaveRatesConfig={handleSaveRatesConfig}
+          availableUnits={availableUnits}
+          knownCleaners={availableCleaners}
+        />
+      )}
+
+      {/* Custom Delete Service Confirmation Modal (Replaces blocked window.confirm) */}
+      {serviceToDelete && showFinancials && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-lg text-[#0B1D4A]">
+                    ¿Eliminar este servicio?
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Esta acción removerá el registro del sistema y de la nube.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setServiceToDelete(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Cliente / Propiedad:</span>
+                <span className="font-bold text-slate-900">{serviceToDelete.unidad || '—'}</span>
+              </div>
+              {serviceToDelete.fecha && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-semibold">Fecha:</span>
+                  <span className="font-bold text-slate-800">{serviceToDelete.fecha}</span>
+                </div>
+              )}
+              {(serviceToDelete.cleaner || serviceToDelete.cleaners?.length) && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-semibold">Cleaner(s):</span>
+                  <span className="font-bold text-slate-800">
+                    {serviceToDelete.cleaners?.length ? serviceToDelete.cleaners.join(', ') : serviceToDelete.cleaner}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setServiceToDelete(null)}
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteService}
+                className="px-5 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Sí, Eliminar Definitivamente</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add Cleaner Modal */}
@@ -827,16 +1000,16 @@ export default function App() {
         />
       )}
 
-      {/* Audit Log Modal */}
-      {isAuditModalOpen && (
+      {/* Audit Log Modal (Master Admins Only) */}
+      {isAuditModalOpen && showFinancials && (
         <AuditLogModal
           isOpen={isAuditModalOpen}
           onClose={() => setIsAuditModalOpen(false)}
         />
       )}
 
-      {/* System Diagnostics & Tests Modal */}
-      {isDiagnosticsModalOpen && (
+      {/* System Diagnostics & Tests Modal (Master Admins Only) */}
+      {isDiagnosticsModalOpen && showFinancials && (
         <SystemDiagnosticsModal
           isOpen={isDiagnosticsModalOpen}
           onClose={() => setIsDiagnosticsModalOpen(false)}
@@ -854,8 +1027,8 @@ export default function App() {
         />
       )}
 
-      {/* Online Inquiries & Quote Requests Modal (Propuesta #1 - Lead Management) */}
-      {isInquiriesModalOpen && (
+      {/* Online Inquiries & Quote Requests Modal (Master Admins Only) */}
+      {isInquiriesModalOpen && showFinancials && (
         <InquiriesModal
           isOpen={isInquiriesModalOpen}
           onClose={() => setIsInquiriesModalOpen(false)}

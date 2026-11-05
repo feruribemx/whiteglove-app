@@ -339,6 +339,18 @@ export async function deleteServiceFromFirestore(serviceId) {
   const path = `services/${sId}`;
   try {
     await deleteDoc(doc(db, 'services', sId));
+    // Also check if any document in 'services' has a different doc.id but internal data.id === serviceId
+    const snap = await getDocs(collection(db, 'services'));
+    const extraDeletes = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      if (String(data?.id) === sId && d.id !== sId) {
+        extraDeletes.push(deleteDoc(doc(db, 'services', d.id)));
+      }
+    });
+    if (extraDeletes.length > 0) {
+      await Promise.all(extraDeletes);
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;

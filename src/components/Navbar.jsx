@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ClipboardList, Package, Calendar, BarChart3, DollarSign,
   Plus, LogOut, User, Menu, X, Shield, History, Globe,
-  ChevronDown, Check, Sparkles, ExternalLink, UserPlus, Mail
+  ChevronDown, Check, Sparkles, ExternalLink, UserPlus, Mail, Sliders
 } from 'lucide-react';
 import { initialsOf, hasFullAccess } from '../lib/auth';
 
@@ -14,6 +14,7 @@ export default function Navbar({
   onOpenNewService,
   onOpenAuditLog,
   onOpenAddCleaner,
+  onOpenRatesConfig,
   onOpenDiagnostics,
   onPreviewLanding,
   onOpenInquiries,
@@ -124,11 +125,26 @@ export default function Navbar({
             })}
           </nav>
 
-          {/* Right Action Zone: Inquiries Badge + Quick Capture + Integrated User Profile Dropdown */}
+          {/* Right Action Zone: Inquiries Badge + Rates Config + Quick Capture + Integrated User Profile Dropdown */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             
-            {/* Online Inquiries Quick Badge (Admins / Supervisors) */}
-            {onOpenInquiries && (
+            {/* Tarifas por Hora Quick Button (Fernando & Michelle) */}
+            {showFinances && onOpenRatesConfig && (
+              <button
+                type="button"
+                onClick={onOpenRatesConfig}
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-[#1E3670] hover:bg-[#28458c] border border-[#FFB566]/40 hover:border-[#FFB566] text-[#FFB566] font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs"
+                title={lang === 'en' ? 'Configure Hourly Pay & Client Rates' : 'Configurar Pago por Hora a Cleaners y Cobro a Clientes'}
+              >
+                <Sliders className="w-3.5 h-3.5 text-[#FFB566]" />
+                <span className="hidden xl:inline">
+                  {lang === 'en' ? 'Hourly Rates' : 'Tarifas $/hr'}
+                </span>
+              </button>
+            )}
+
+            {/* Online Inquiries Quick Badge (Master Admins Only) */}
+            {showFinances && onOpenInquiries && (
               <button
                 type="button"
                 onClick={onOpenInquiries}
@@ -229,10 +245,34 @@ export default function Navbar({
                     </div>
                   </div>
 
-                  {/* Section A: Navigation & Admin Tools */}
+                  {/* Section A: Navigation & Admin Tools (Strictly guarded by showFinances) */}
                   <div className="p-2 space-y-1">
-                    {isAdmin && (
+                    {showFinances && (
                       <>
+                        {onOpenRatesConfig && (
+                          <button
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              onOpenRatesConfig();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-[#1E3670] bg-[#1E3670]/40 border border-[#FFB566]/30 transition-colors text-left"
+                          >
+                            <div className="w-7 h-7 rounded-lg bg-[#FFB566]/20 flex items-center justify-center text-[#FFB566] shrink-0">
+                              <Sliders className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                              <span className="block font-bold text-[#FFB566]">
+                                {lang === 'en' ? 'Hourly Pay & Client Billing Rates' : 'Tarifas y Pagos por Hora ($/hr)'}
+                              </span>
+                              <span className="text-[10px] text-slate-300 block font-normal">
+                                {lang === 'en'
+                                  ? 'Set cleaner pay per client (e.g. Mafer/Georgia) & client hourly rates'
+                                  : 'Configura pago por hora a cleaners (por cliente) y cobro por hora a clientes'}
+                              </span>
+                            </div>
+                          </button>
+                        )}
+
                         {onOpenInquiries && (
                           <button
                             onClick={() => {
@@ -284,25 +324,27 @@ export default function Navbar({
                           </button>
                         )}
 
-                        <button
-                          onClick={() => {
-                            setUserDropdownOpen(false);
-                            if (onOpenAuditLog) onOpenAuditLog();
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
-                        >
-                          <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-amber-300 shrink-0">
-                            <History className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1">
-                            <span className="block font-semibold">
-                              {lang === 'en' ? 'Audit Log & Change History' : 'Historial de Auditoría & Cambios'}
-                            </span>
-                            <span className="text-[10px] text-slate-400 block font-normal">
-                              {lang === 'en' ? 'Track all registered actions and edits' : 'Monitorea ediciones y servicios capturados'}
-                            </span>
-                          </div>
-                        </button>
+                        {onOpenAuditLog && (
+                          <button
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              onOpenAuditLog();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
+                          >
+                            <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-amber-300 shrink-0">
+                              <History className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                              <span className="block font-semibold">
+                                {lang === 'en' ? 'Audit Log & Change History' : 'Historial de Auditoría & Cambios'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block font-normal">
+                                {lang === 'en' ? 'Track all registered actions and edits' : 'Monitorea ediciones y servicios capturados'}
+                              </span>
+                            </div>
+                          </button>
+                        )}
 
                         {onOpenDiagnostics && (
                           <button
@@ -483,8 +525,21 @@ export default function Navbar({
                 </button>
               )}
 
-              {isAdmin && (
+              {showFinances && (
                 <>
+                  {onOpenRatesConfig && (
+                    <button
+                      onClick={() => {
+                        onOpenRatesConfig();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-[#FFB566] bg-[#1E3670]/50 hover:bg-[#1E3670] rounded-xl"
+                    >
+                      <Sliders className="w-4 h-4 text-[#FFB566]" />
+                      <span>{lang === 'en' ? 'Hourly Pay & Client Rates ($/hr)' : 'Tarifas y Pagos por Hora ($/hr)'}</span>
+                    </button>
+                  )}
+
                   {onOpenInquiries && (
                     <button
                       onClick={() => {
@@ -518,16 +573,18 @@ export default function Navbar({
                     </button>
                   )}
 
-                  <button
-                    onClick={() => {
-                      if (onOpenAuditLog) onOpenAuditLog();
-                      setMobileMenuOpen(false);
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 rounded-xl"
-                  >
-                    <History className="w-4 h-4 text-amber-300" />
-                    <span>{lang === 'en' ? 'Audit Log & Changes' : 'Historial de Auditoría & Cambios'}</span>
-                  </button>
+                  {onOpenAuditLog && (
+                    <button
+                      onClick={() => {
+                        onOpenAuditLog();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 rounded-xl"
+                    >
+                      <History className="w-4 h-4 text-amber-300" />
+                      <span>{lang === 'en' ? 'Audit Log & Changes' : 'Historial de Auditoría & Cambios'}</span>
+                    </button>
+                  )}
                 </>
               )}
 

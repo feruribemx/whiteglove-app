@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Search, Download, Plus, Edit2, Trash2, User, Clock, DollarSign,
   Sparkles, Ban, RotateCcw, CheckCircle2, Building2, Calendar, BookOpen, X, Filter, Copy,
-  MoreVertical, UserPlus
+  MoreVertical, UserPlus, Sliders
 } from 'lucide-react';
 import { hasFullAccess, canManagePagos, isMariaOrFerCastil, isMaferCleaner } from '../lib/auth';
 import { exportServicesToCSV } from '../lib/export';
@@ -37,6 +37,7 @@ export default function ServicesList({
   onCancelService,
   onOpenNewService,
   onOpenAddCleaner,
+  onOpenRatesConfig,
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -352,6 +353,18 @@ export default function ServicesList({
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 flex-wrap">
+          {showFinancials && onOpenRatesConfig && (
+            <button
+              type="button"
+              onClick={onOpenRatesConfig}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-300/80 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
+              title="Configurar pago por hora a cada cleaner (por cliente) y cobro por hora a clientes"
+            >
+              <Sliders className="w-3.5 h-3.5 text-indigo-700" />
+              <span>Tarifas por Hora ($/hr)</span>
+            </button>
+          )}
+
           {showFinancials && (
             <button
               onClick={() => setShowGlossaryModal(true)}
@@ -737,31 +750,62 @@ export default function ServicesList({
                       </span>
                     </td>
 
-                    {/* Acciones de Administrador (Menú de tres puntos ⋮) */}
+                    {/* Acciones de Administrador (Botones directos Editar / Eliminar + Menú ⋮) */}
                     {canEdit && (
-                      <td className="px-4 py-3 text-center whitespace-nowrap relative action-menu-cell">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuId((prev) => (prev === svc.id ? null : svc.id));
-                          }}
-                          className={`p-1.5 rounded-xl transition-all cursor-pointer ${
-                            openMenuId === svc.id
-                              ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs'
-                              : 'text-slate-500 hover:text-[#0B1D4A] hover:bg-slate-100'
-                          }`}
-                          title="Acciones de administrador"
-                          aria-label="Acciones de administrador"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
+                      <td className="px-3 py-3 text-center whitespace-nowrap relative action-menu-cell">
+                        <div className="inline-flex items-center justify-center gap-1">
+                          {/* Botón directo Editar */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditService(svc);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-[#0B1D4A] hover:bg-slate-100 transition-colors cursor-pointer"
+                            title="Editar servicio"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Botón directo Eliminar (Solo Administradores con permiso) */}
+                          {onDeleteService && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteService(svc.id);
+                              }}
+                              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Eliminar servicio"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {/* Menú de 3 puntos (Más opciones: Duplicar, Cancelar) */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId((prev) => (prev === svc.id ? null : svc.id));
+                            }}
+                            className={`p-1.5 rounded-xl transition-all cursor-pointer ${
+                              openMenuId === svc.id
+                                ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs'
+                                : 'text-slate-500 hover:text-[#0B1D4A] hover:bg-slate-100'
+                            }`}
+                            title="Más opciones"
+                            aria-label="Más opciones"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </div>
 
                         {/* Dropdown Menu */}
                         {openMenuId === svc.id && (
                           <div
                             onClick={(e) => e.stopPropagation()}
-                            className={`absolute right-3 w-48 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 text-left animate-in fade-in zoom-in-95 duration-100 ${
+                            className={`absolute right-3 w-48 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-left animate-in fade-in zoom-in-95 duration-100 ${
                               index >= filteredServices.length - 2 && filteredServices.length > 2
                                 ? 'bottom-full mb-1'
                                 : 'top-full mt-1'
@@ -840,20 +884,23 @@ export default function ServicesList({
                               )}
                             </button>
 
-                            <div className="my-1 border-t border-slate-100" />
-
-                            {/* 4. Eliminar */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                onDeleteService(svc.id);
-                              }}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer text-left"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                              <span>Eliminar servicio</span>
-                            </button>
+                            {/* 4. Eliminar (solo si tiene permiso) */}
+                            {onDeleteService && (
+                              <>
+                                <div className="my-1 border-t border-slate-100" />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    onDeleteService(svc.id);
+                                  }}
+                                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer text-left"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                  <span>Eliminar servicio</span>
+                                </button>
+                              </>
+                            )}
                           </div>
                         )}
                       </td>
