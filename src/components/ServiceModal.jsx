@@ -57,6 +57,7 @@ export default function ServiceModal({
   const [tip, setTip] = useState('');
   const [ratesPorCleaner, setRatesPorCleaner] = useState({});
   const [pagosPorCleaner, setPagosPorCleaner] = useState({});
+  const [horasPorCleaner, setHorasPorCleaner] = useState({});
   const [capturista, setCapturista] = useState('');
   const [validationError, setValidationError] = useState('');
 
@@ -79,6 +80,19 @@ export default function ServiceModal({
     const hours = Number(h) || 0;
     const mins = Number(m) || 0;
     return parseFloat((hours + mins / 60).toFixed(2));
+  };
+
+  // Split decimal hours into whole hours and snapped minutes (0, 15, 20, 30, 45)
+  const splitDecimalHours = (decVal) => {
+    const num = Math.max(0, Number(decVal) || 0);
+    const whole = Math.floor(num);
+    const rawMins = Math.round((num - whole) * 60);
+    const validMins = [0, 15, 20, 30, 45];
+    const snappedMin = validMins.reduce(
+      (prev, curr) => (Math.abs(curr - rawMins) < Math.abs(prev - rawMins) ? curr : prev),
+      0
+    );
+    return { h: whole, m: snappedMin };
   };
 
   // Default suggested pay rate calculation using Cleaner + Client rules
@@ -126,12 +140,19 @@ export default function ServiceModal({
 
       const fallbackRate = Number(rates?.[serviceToEdit.tipo || 'Limpieza']?.amount) || 20;
       const loadedRates = { ...(serviceToEdit.ratesPorCleaner || {}) };
+      const loadedHoras = { ...(serviceToEdit.horasPorCleaner || {}) };
       cls.forEach((cl) => {
         if (!loadedRates[cl]) {
           loadedRates[cl] = resolveCleanerHourlyRate(cl, selectedUnit, activeRatesConfig, fallbackRate);
         }
+        if (loadedHoras[cl] == null || Number(loadedHoras[cl]) <= 0) {
+          loadedHoras[cl] = totalH;
+        } else {
+          loadedHoras[cl] = Number(loadedHoras[cl]);
+        }
       });
       setRatesPorCleaner(loadedRates);
+      setHorasPorCleaner(loadedHoras);
       setPagosPorCleaner(serviceToEdit.pagosPorCleaner || {});
       setCapturista(serviceToEdit.capturista || loggedCleanerName);
 
@@ -152,11 +173,20 @@ export default function ServiceModal({
       const initialUnit = prefill?.unidad || availableUnits[0] || 'Cliente General';
       setUnidad(initialUnit);
 
+      // Automatic memory recall from last service with this client
+      const mem = resolveClientMemory(initialUnit, services, clientMemory);
+      setMemoryInfo(mem);
+      const clientHrRate = resolveClientHourlyRate(initialUnit, activeRatesConfig);
+
       let targetCleaners = [];
       if (isCleaner) {
         targetCleaners = [loggedCleanerName];
       } else if (isSupervisorFer) {
         targetCleaners = ['Maria'];
+      } else if (prefill?.cleaners?.length && (prefill?.isDuplicate || prefill?.explicitCleaners)) {
+        targetCleaners = prefill.cleaners;
+      } else if (mem?.cleaners?.length > 0) {
+        targetCleaners = mem.cleaners;
       } else if (prefill?.cleaners?.length) {
         targetCleaners = prefill.cleaners;
       } else if (prefill?.cleaner) {
@@ -171,61 +201,79 @@ export default function ServiceModal({
       setTip(prefill?.tip != null ? String(prefill.tip) : '');
       setCapturista(currentUser?.displayName || currentUser?.username || loggedCleanerName || 'WhiteGlove');
 
-      // Automatic memory recall & hourly rate for default client
-      const mem = resolveClientMemory(initialUnit, services, clientMemory);
-      setMemoryInfo(mem);
-      const clientHrRate = resolveClientHourlyRate(initialUnit, activeRatesConfig);
-
       let initialWhole = 2;
       let initialMins = 0;
 
-      if (mem && mem.horas) {
-        initialWhole = Math.floor(mem.horas || 2);
-        initialMins = Math.round(((mem.horas || 2) - initialWhole) * 60);
+      if (prefill?.horas && (prefill?.isDuplicate || prefill?.explicitHoras)) {
+        const split = splitDecimalHours(prefill.horas);
+        initialWhole = split.h;
+        initialMins = split.m;
+      } else if (mem && mem.horas) {
+        const split = splitDecimalHours(mem.horas);
+        initialWhole = split.h;
+        initialMins = split.m;
       } else if (prefill?.horas) {
-        const prefH = Number(prefill.horas) || 2;
-        initialWhole = Math.floor(prefH);
-        initialMins = Math.round((prefH - initialWhole) * 60);
+        const split = splitDecimalHours(prefill.horas);
+        initialWhole = split.h;
+        initialMins = split.m;
       }
       setHorasEnteras(initialWhole);
       setMinutos(initialMins);
       const initDecimalHours = computeDecimalHours(initialWhole, initialMins) || 2;
 
+      let resolvedCobroStr = '';
       if (clientHrRate != null && clientHrRate > 0) {
         const calcCobro = parseFloat((clientHrRate * initDecimalHours).toFixed(2));
-        setCobro(String(calcCobro));
+        resolvedCobroStr = String(calcCobro);
+        setCobro(resolvedCobroStr);
         setPagoCleaningTeam(mem?.pagoCleaningTeam ? String(mem.pagoCleaningTeam) : '');
         setTipo(mem?.tipo || prefill?.tipo || 'Limpieza');
-        if (showFinancials) {
-          setAutofillBanner(`Tarifa por hora de $${clientHrRate}/hr CAD para "${initialUnit}" aplicada (${initDecimalHours}h = $${calcCobro} CAD).`);
-        } else {
-          setAutofillBanner(null);
-        }
       } else if (mem && mem.cobro != null && mem.cobro > 0) {
-        setCobro(String(mem.cobro));
+        resolvedCobroStr = String(mem.cobro);
+        setCobro(resolvedCobroStr);
         setPagoCleaningTeam(mem.pagoCleaningTeam ? String(mem.pagoCleaningTeam) : '');
         setTipo(mem.tipo || 'Limpieza');
-        if (showFinancials) {
-          setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${initialUnit}" cargada automáticamente desde memoria.`);
+      } else {
+        resolvedCobroStr = prefill?.cobro != null ? String(prefill.cobro) : '';
+        setCobro(resolvedCobroStr);
+        setPagoCleaningTeam('');
+        setTipo(mem?.tipo || prefill?.tipo || 'Limpieza');
+      }
+
+      if (mem && (mem.lastService || mem.isRecurring)) {
+        const dateNote = mem.lastServiceDate ? ` (${mem.lastServiceDate})` : '';
+        if (showFinancials && resolvedCobroStr) {
+          setAutofillBanner(
+            `Rellenado en automático con el último servicio de "${initialUnit}"${dateNote}: ${targetCleaners.join(', ')} · ${initDecimalHours}h · $${resolvedCobroStr} CAD listo para guardar.`
+          );
         } else {
-          setAutofillBanner(null);
+          setAutofillBanner(
+            `Rellenado en automático con el último servicio de "${initialUnit}"${dateNote}: ${targetCleaners.join(', ')} · ${initDecimalHours}h listo para guardar.`
+          );
         }
       } else {
-        setCobro(prefill?.cobro != null ? String(prefill.cobro) : '');
-        setPagoCleaningTeam('');
-        setTipo(prefill?.tipo || 'Limpieza');
         setAutofillBanner(null);
       }
 
       const defaultRate = rates?.['Limpieza']?.amount || 20;
       const initialRates = {};
       const initialPagos = {};
+      const initialHoras = {};
       targetCleaners.forEach((cl) => {
-        const resolvedRate = resolveCleanerHourlyRate(cl, initialUnit, activeRatesConfig, defaultRate);
+        const fallbackForCleaner = mem?.ratesPorCleaner?.[cl] || defaultRate;
+        const resolvedRate = resolveCleanerHourlyRate(cl, initialUnit, activeRatesConfig, fallbackForCleaner);
+        const clHours =
+          prefill?.horasPorCleaner && prefill.horasPorCleaner[cl] != null
+            ? Number(prefill.horasPorCleaner[cl]) || initDecimalHours
+            : mem?.horasPorCleaner && mem.horasPorCleaner[cl] != null && Number(mem.horasPorCleaner[cl]) > 0
+            ? Number(mem.horasPorCleaner[cl])
+            : initDecimalHours;
         initialRates[cl] = resolvedRate;
-        initialPagos[cl] = parseFloat((resolvedRate * initDecimalHours).toFixed(2));
+        initialHoras[cl] = clHours;
+        initialPagos[cl] = parseFloat((resolvedRate * clHours).toFixed(2));
       });
       setRatesPorCleaner(initialRates);
+      setHorasPorCleaner(initialHoras);
       setPagosPorCleaner(initialPagos);
       const totalP = Object.values(initialPagos).reduce((s, v) => s + (Number(v) || 0), 0);
       setPagoCleaner(String(parseFloat(totalP.toFixed(2))));
@@ -235,19 +283,34 @@ export default function ServiceModal({
   }, [serviceToEdit, isOpen, isCleaner, loggedCleanerName, isSupervisorFer, availableUnits, services, ratesConfig]);
 
   // Recalculate suggested pay when cleaners, unit, or duration changes
-  const updatePayForCleaners = (cleanersList, h, m, targetUnit = unidad, customRatesMap = null) => {
+  const updatePayForCleaners = (
+    cleanersList,
+    h,
+    m,
+    targetUnit = unidad,
+    customRatesMap = null,
+    customHorasMap = null
+  ) => {
     const totalDecimal = computeDecimalHours(h, m);
     const fallbackRate = Number(rates?.[tipo]?.amount) || 20;
     const nextRates = {};
     const nextPagos = {};
-    cleanersList.forEach(cl => {
-      const rate = customRatesMap && customRatesMap[cl] != null
-        ? Number(customRatesMap[cl])
-        : resolveCleanerHourlyRate(cl, targetUnit, activeRatesConfig, fallbackRate);
+    const nextHoras = {};
+    cleanersList.forEach((cl) => {
+      const rate =
+        customRatesMap && customRatesMap[cl] != null
+          ? Number(customRatesMap[cl])
+          : resolveCleanerHourlyRate(cl, targetUnit, activeRatesConfig, fallbackRate);
+      const clHours =
+        customHorasMap && customHorasMap[cl] != null && Number(customHorasMap[cl]) > 0
+          ? Number(customHorasMap[cl])
+          : totalDecimal;
       nextRates[cl] = rate;
-      nextPagos[cl] = parseFloat((rate * totalDecimal).toFixed(2));
+      nextHoras[cl] = clHours;
+      nextPagos[cl] = parseFloat((rate * clHours).toFixed(2));
     });
     setRatesPorCleaner(nextRates);
+    setHorasPorCleaner(nextHoras);
     setPagosPorCleaner(nextPagos);
     const totalP = Object.values(nextPagos).reduce((s, v) => s + (Number(v) || 0), 0);
     setPagoCleaner(String(parseFloat(totalP.toFixed(2))));
@@ -258,19 +321,19 @@ export default function ServiceModal({
     let next;
     if (selectedCleaners.includes(cleanerName)) {
       if (selectedCleaners.length === 1) return; // Keep at least one
-      next = selectedCleaners.filter(c => c !== cleanerName);
+      next = selectedCleaners.filter((c) => c !== cleanerName);
     } else {
       next = [...selectedCleaners, cleanerName];
     }
     setSelectedCleaners(next);
-    updatePayForCleaners(next, horasEnteras, minutos, unidad, null);
+    updatePayForCleaners(next, horasEnteras, minutos, unidad, ratesPorCleaner, horasPorCleaner);
   };
 
   const handleDurationChange = (newH, newM) => {
     setHorasEnteras(newH);
     setMinutos(newM);
     const totalDecimal = computeDecimalHours(newH, newM);
-    updatePayForCleaners(selectedCleaners, newH, newM, unidad, ratesPorCleaner);
+    updatePayForCleaners(selectedCleaners, newH, newM, unidad, ratesPorCleaner, null);
 
     // Also auto-update client charge if this client has a configured hourly billing rate
     const clientHrRate = resolveClientHourlyRate(unidad, activeRatesConfig);
@@ -280,14 +343,44 @@ export default function ServiceModal({
     }
   };
 
+  // Change individual hours & minutes for a specific cleaner on this service (e.g. Mafer = 5h, Karina = 3h)
+  const handleCleanerIndividualDuration = (cleanerName, newH, newM) => {
+    const clDecimal = computeDecimalHours(newH, newM);
+    const nextHoras = { ...horasPorCleaner, [cleanerName]: clDecimal };
+    setHorasPorCleaner(nextHoras);
+
+    if (selectedCleaners.length === 1 && selectedCleaners[0] === cleanerName) {
+      setHorasEnteras(newH);
+      setMinutos(newM);
+    }
+
+    const fallbackRate = Number(rates?.[tipo]?.amount) || 20;
+    const rate =
+      ratesPorCleaner[cleanerName] != null
+        ? Number(ratesPorCleaner[cleanerName])
+        : resolveCleanerHourlyRate(cleanerName, unidad, activeRatesConfig, fallbackRate);
+
+    const nextPagos = {
+      ...pagosPorCleaner,
+      [cleanerName]: parseFloat((rate * clDecimal).toFixed(2)),
+    };
+    setPagosPorCleaner(nextPagos);
+    const totalP = selectedCleaners.reduce((sum, c) => sum + (Number(nextPagos[c]) || 0), 0);
+    setPagoCleaner(String(parseFloat(totalP.toFixed(2))));
+  };
+
   const handleCustomCleanerRate = (cleanerName, newRateVal) => {
     const rateNum = Number(newRateVal) || 0;
     const nextRates = { ...ratesPorCleaner, [cleanerName]: rateNum };
     setRatesPorCleaner(nextRates);
     const totalDecimal = computeDecimalHours(horasEnteras, minutos);
+    const clHours =
+      horasPorCleaner[cleanerName] != null && Number(horasPorCleaner[cleanerName]) > 0
+        ? Number(horasPorCleaner[cleanerName])
+        : totalDecimal;
     const nextPagos = {
       ...pagosPorCleaner,
-      [cleanerName]: parseFloat((rateNum * totalDecimal).toFixed(2))
+      [cleanerName]: parseFloat((rateNum * clHours).toFixed(2)),
     };
     setPagosPorCleaner(nextPagos);
     const totalP = Object.values(nextPagos).reduce((s, v) => s + (Number(v) || 0), 0);
@@ -309,11 +402,19 @@ export default function ServiceModal({
 
     let nextWhole = horasEnteras;
     let nextMins = minutos;
+    let nextCleaners = selectedCleaners;
 
-    if (!serviceToEdit || serviceToEdit.isDuplicate) {
+    if (!isRealEdit) {
+      // Auto-fill cleaners from last service with this client (unless locked to current cleaner/supervisor)
+      if (!isCleaner && !isSupervisorFer && mem?.cleaners?.length > 0) {
+        nextCleaners = mem.cleaners;
+        setSelectedCleaners(nextCleaners);
+      }
+
       if (mem && mem.horas) {
-        nextWhole = Math.floor(mem.horas);
-        nextMins = Math.round((mem.horas - nextWhole) * 60);
+        const split = splitDecimalHours(mem.horas);
+        nextWhole = split.h;
+        nextMins = split.m;
         setHorasEnteras(nextWhole);
         setMinutos(nextMins);
       }
@@ -327,27 +428,55 @@ export default function ServiceModal({
 
     const totalDecimal = computeDecimalHours(nextWhole, nextMins);
 
-    // Always recalculate cleaner hourly pay according to the new client (e.g. Mafer + Georgia = 23.50/hr, Mafer + Max = 20/hr)
-    updatePayForCleaners(selectedCleaners, nextWhole, nextMins, newUnit, null);
+    // Build per-cleaner hours map from the client's last service (if available) or totalDecimal
+    const nextHorasMap = {};
+    nextCleaners.forEach((cl) => {
+      if (
+        !isRealEdit &&
+        mem?.horasPorCleaner &&
+        mem.horasPorCleaner[cl] != null &&
+        Number(mem.horasPorCleaner[cl]) > 0
+      ) {
+        nextHorasMap[cl] = Number(mem.horasPorCleaner[cl]);
+      } else if (isRealEdit && horasPorCleaner[cl] != null && Number(horasPorCleaner[cl]) > 0) {
+        nextHorasMap[cl] = Number(horasPorCleaner[cl]);
+      } else {
+        nextHorasMap[cl] = totalDecimal;
+      }
+    });
 
-    // Recalculate client charge based on hourly rate or client memory
+    // Always recalculate cleaner hourly pay according to the new client (e.g. Mafer + Georgia = 23.50/hr, Mafer + Max = 20/hr)
+    updatePayForCleaners(nextCleaners, nextWhole, nextMins, newUnit, null, nextHorasMap);
+
+    // Recalculate client charge based on hourly rate or last service memory
+    let resolvedCobroStr = '';
     if (clientHrRate != null && clientHrRate > 0) {
       const calcCobro = parseFloat((clientHrRate * totalDecimal).toFixed(2));
-      setCobro(String(calcCobro));
-      if (showFinancials) {
-        setAutofillBanner(`Tarifa por hora de $${clientHrRate}/hr CAD para "${newUnit}" aplicada (${totalDecimal}h = $${calcCobro} CAD).`);
-      } else {
-        setAutofillBanner(null);
-      }
-    } else if ((!serviceToEdit || serviceToEdit.isDuplicate) && mem && mem.cobro != null && mem.cobro > 0) {
-      setCobro(String(mem.cobro));
-      if (showFinancials) {
-        setAutofillBanner(`Tarifa habitual de $${mem.cobro} CAD para "${newUnit}" cargada automáticamente desde memoria.`);
-      } else {
-        setAutofillBanner(null);
-      }
-    } else if (!serviceToEdit || serviceToEdit.isDuplicate) {
+      resolvedCobroStr = String(calcCobro);
+      setCobro(resolvedCobroStr);
+    } else if (!isRealEdit && mem && mem.cobro != null && mem.cobro > 0) {
+      resolvedCobroStr = String(mem.cobro);
+      setCobro(resolvedCobroStr);
+    } else if (!isRealEdit) {
       setCobro('');
+    }
+
+    if (!isRealEdit && mem && (mem.lastService || mem.isRecurring)) {
+      const dateNote = mem.lastServiceDate ? ` (${mem.lastServiceDate})` : '';
+      if (showFinancials && resolvedCobroStr) {
+        setAutofillBanner(
+          `Rellenado en automático con el último servicio de "${newUnit}"${dateNote}: ${nextCleaners.join(', ')} · ${totalDecimal}h · $${resolvedCobroStr} CAD listo para guardar.`
+        );
+      } else {
+        setAutofillBanner(
+          `Rellenado en automático con el último servicio de "${newUnit}"${dateNote}: ${nextCleaners.join(', ')} · ${totalDecimal}h listo para guardar.`
+        );
+      }
+    } else if (clientHrRate != null && clientHrRate > 0 && showFinancials) {
+      setAutofillBanner(
+        `Tarifa por hora de $${clientHrRate}/hr CAD para "${newUnit}" aplicada (${totalDecimal}h = $${resolvedCobroStr} CAD).`
+      );
+    } else if (!isRealEdit) {
       setAutofillBanner(null);
     }
   };
@@ -427,22 +556,41 @@ export default function ServiceModal({
     }
 
     const totalDecimalHours = computeDecimalHours(horasEnteras, minutos);
-    const finalHours = totalDecimalHours > 0 ? totalDecimalHours : 2;
+    const baseHours = totalDecimalHours > 0 ? totalDecimalHours : 2;
 
     const isDup = Boolean(serviceToEdit?.isDuplicate);
     const targetId = (!isDup && serviceToEdit?.id)
       ? String(serviceToEdit.id)
       : String(Date.now() + Math.floor(Math.random() * 1000));
 
-    // Calculate rates and payments cleanly
+    // Calculate per-cleaner hours, rates, and payments cleanly
+    const safeHoras = {};
+    finalCleaners.forEach((c) => {
+      const hVal = Number(horasPorCleaner?.[c]);
+      safeHoras[c] = !Number.isNaN(hVal) && hVal > 0 ? parseFloat(hVal.toFixed(2)) : baseHours;
+    });
+
+    const distinctHoursSet = new Set(Object.values(safeHoras));
+    const finalHours =
+      finalCleaners.length === 1
+        ? safeHoras[finalCleaners[0]]
+        : distinctHoursSet.size === 1
+        ? safeHoras[finalCleaners[0]]
+        : parseFloat(
+            Object.values(safeHoras)
+              .reduce((sum, v) => sum + v, 0)
+              .toFixed(2)
+          );
+
     const safePagos = {};
     finalCleaners.forEach((c) => {
       const p = pagosPorCleaner?.[c];
+      const clHours = safeHoras[c] || baseHours;
       if (p != null && !Number.isNaN(Number(p)) && p !== '') {
         safePagos[c] = Number(p);
       } else {
         const rate = Number(ratesPorCleaner?.[c]) || Number(rates?.[tipo]?.amount) || 18;
-        safePagos[c] = parseFloat((rate * finalHours).toFixed(2));
+        safePagos[c] = parseFloat((rate * clHours).toFixed(2));
       }
     });
 
@@ -461,6 +609,7 @@ export default function ServiceModal({
       cleaners: finalCleaners,
       cleaner: finalCleaners[0],
       horas: finalHours,
+      horasPorCleaner: Object.keys(safeHoras).length ? safeHoras : null,
       tipo: tipo || 'Limpieza',
       status: status || 'activo',
       cobro: showFinancials && cobro !== '' ? (Number(cobro) || 0) : (serviceToEdit?.cobro != null ? Number(serviceToEdit.cobro) : null),
@@ -476,12 +625,16 @@ export default function ServiceModal({
     delete payload.nativeEvent;
     delete payload._reactName;
 
-    // Persist client memory so future and recurring duplicates fill in automatic
-    if (finalUnidad && cobro !== '') {
+    // Persist client memory so future services and calendar additions fill in automatic
+    if (finalUnidad) {
       saveClientMemory(finalUnidad, {
-        cobro: Number(cobro) || 0,
+        ...(cobro !== '' ? { cobro: Number(cobro) || 0 } : {}),
         tipo,
         horas: finalHours,
+        horasPorCleaner: Object.keys(safeHoras).length ? safeHoras : null,
+        ratesPorCleaner: Object.keys(safeRates).length ? safeRates : null,
+        pagosPorCleaner: Object.keys(safePagos).length ? safePagos : null,
+        pagoCleaner: payload.pagoCleaner,
         pagoCleaningTeam: pagoCleaningTeam !== '' ? (Number(pagoCleaningTeam) || 0) : 0,
         cleaners: finalCleaners,
       });
@@ -900,59 +1053,152 @@ export default function ServiceModal({
             </div>
           </div>
 
-          {/* Individual Cleaner Pay Breakdown (with Hourly Rate $/h + Total Pay) */}
-          {selectedCleaners.length > 0 && canEditPay && (
-            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-slate-700 block">
-                  Pago por Hora y Total por Cleaner ({totalDecimalHours}h en {unidad || 'Cliente'})
-                </span>
+          {/* Individual Cleaner Time (Hours & Minutes) and Pay Breakdown */}
+          {selectedCleaners.length > 0 && (
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <span className="text-xs font-bold text-[#0B1D4A] block">
+                    Tiempo Trabajado {canEditPay ? 'y Pago ' : ''}por Cleaner en este Servicio
+                  </span>
+                  <span className="text-[11px] text-slate-500 block">
+                    Puedes asignar horas distintas a cada cleaner en el mismo servicio (ej. Mafer 5h y Karina 3h)
+                  </span>
+                </div>
                 {showFinancials && onOpenRatesConfig && (
                   <button
                     type="button"
                     onClick={onOpenRatesConfig}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] font-bold transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] font-bold transition-colors cursor-pointer shrink-0"
                   >
                     <Sliders className="w-3 h-3" />
                     <span>Configurar Tarifas $/hr</span>
                   </button>
                 )}
               </div>
-              <div className="space-y-1.5">
+
+              <div className="space-y-2.5">
                 {selectedCleaners.map((cl) => {
-                  const cleanerHrRate = ratesPorCleaner[cl] ?? resolveCleanerHourlyRate(cl, unidad, activeRatesConfig, 20);
+                  const cleanerHrRate =
+                    ratesPorCleaner[cl] ??
+                    resolveCleanerHourlyRate(cl, unidad, activeRatesConfig, 20);
+                  const clDecimalHours =
+                    horasPorCleaner[cl] != null && Number(horasPorCleaner[cl]) > 0
+                      ? Number(horasPorCleaner[cl])
+                      : totalDecimalHours;
+                  const { h: clWholeH, m: clMins } = splitDecimalHours(clDecimalHours);
+
                   return (
-                    <div key={cl} className="flex flex-wrap items-center justify-between gap-2 text-xs bg-white p-2.5 rounded-xl border border-slate-200">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-800">{cl}</span>
-                        <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-bold">
-                          ${cleanerHrRate}/hr × {totalDecimalHours}h
-                        </span>
+                    <div
+                      key={cl}
+                      className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2.5"
+                    >
+                      {/* Top row: Cleaner Identity + Individual Hours & Minutes Selectors */}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-[#0B1D4A] text-[#FFB566] font-bold text-xs flex items-center justify-center shrink-0">
+                            {cl.charAt(0)}
+                          </div>
+                          <div>
+                            <span className="font-bold text-slate-900 text-xs block">
+                              {cl}
+                            </span>
+                            <span className="text-[10px] text-emerald-700 font-bold">
+                              Tiempo asignado: {clWholeH}h {clMins > 0 ? `${clMins}m` : ''} ({clDecimalHours} hrs)
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Individual Hours & Minutes Dropdowns */}
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+                            <Clock className="w-3.5 h-3.5 text-[#0B1D4A]" />
+                            <select
+                              value={clWholeH}
+                              onChange={(e) =>
+                                handleCleanerIndividualDuration(cl, Number(e.target.value), clMins)
+                              }
+                              className="text-xs font-bold text-[#0B1D4A] bg-transparent focus:outline-none cursor-pointer"
+                              title={`Horas trabajadas por ${cl}`}
+                            >
+                              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((hOpt) => (
+                                <option key={hOpt} value={hOpt}>
+                                  {hOpt} {hOpt === 1 ? 'hr' : 'hrs'}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-slate-300">|</span>
+                            <select
+                              value={clMins}
+                              onChange={(e) =>
+                                handleCleanerIndividualDuration(cl, clWholeH, Number(e.target.value))
+                              }
+                              className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none cursor-pointer"
+                              title={`Minutos adicionales trabajados por ${cl}`}
+                            >
+                              <option value={0}>0 min</option>
+                              <option value={15}>15 min</option>
+                              <option value={20}>20 min</option>
+                              <option value={30}>30 min</option>
+                              <option value={45}>45 min</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {/* Hourly Rate input */}
-                        <div className="flex items-center gap-1" title="Pago por hora para este servicio">
-                          <span className="text-[10px] text-slate-400 font-bold">$/h:</span>
-                          <input
-                            type="number"
-                            step="0.25"
-                            value={cleanerHrRate}
-                            onChange={(e) => handleCustomCleanerRate(cl, e.target.value)}
-                            className="w-16 px-1.5 py-1 text-xs border border-indigo-200 bg-indigo-50/40 text-indigo-800 rounded-lg text-right font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
+
+                      {/* Quick 1-click hour chips for this cleaner + Rate/Pay */}
+                      <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-slate-100">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">
+                            Horas de {cl}:
+                          </span>
+                          {[1, 2, 3, 4, 5, 6, 7, 8].map((hQuick) => {
+                            const isSelectedHour = clWholeH === hQuick && clMins === 0;
+                            return (
+                              <button
+                                key={hQuick}
+                                type="button"
+                                onClick={() => handleCleanerIndividualDuration(cl, hQuick, 0)}
+                                className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all cursor-pointer ${
+                                  isSelectedHour
+                                    ? 'bg-[#0B1D4A] text-[#FFB566] border-[#0B1D4A] shadow-2xs'
+                                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                                }`}
+                              >
+                                {hQuick}h
+                              </button>
+                            );
+                          })}
                         </div>
-                        {/* Total Pay input */}
-                        <div className="flex items-center gap-1" title="Pago total al cleaner por este servicio">
-                          <span className="text-slate-400 font-semibold">Total $</span>
-                          <input
-                            type="number"
-                            step="0.25"
-                            value={pagosPorCleaner[cl] ?? ''}
-                            onChange={(e) => handleCustomCleanerPay(cl, e.target.value)}
-                            className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-lg text-right font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-[#0B1D4A]"
-                          />
-                          <span className="text-[10px] text-slate-400 font-semibold">CAD</span>
-                        </div>
+
+                        {canEditPay && (
+                          <div className="flex items-center gap-2 ml-auto">
+                            <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-bold">
+                              ${cleanerHrRate}/hr × {clDecimalHours}h
+                            </span>
+                            <div className="flex items-center gap-1" title="Pago por hora para este cleaner">
+                              <span className="text-[10px] text-slate-400 font-bold">$/h:</span>
+                              <input
+                                type="number"
+                                step="0.25"
+                                value={cleanerHrRate}
+                                onChange={(e) => handleCustomCleanerRate(cl, e.target.value)}
+                                className="w-16 px-1.5 py-1 text-xs border border-indigo-200 bg-indigo-50/40 text-indigo-800 rounded-lg text-right font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1" title="Pago total al cleaner por este servicio">
+                              <span className="text-[11px] text-slate-500 font-bold">Pago $</span>
+                              <input
+                                type="number"
+                                step="0.25"
+                                value={pagosPorCleaner[cl] ?? ''}
+                                onChange={(e) => handleCustomCleanerPay(cl, e.target.value)}
+                                className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-lg text-right font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-[#0B1D4A]"
+                              />
+                              <span className="text-[10px] text-slate-400 font-semibold">CAD</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

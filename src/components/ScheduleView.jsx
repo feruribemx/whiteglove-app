@@ -24,8 +24,25 @@ import {
   CalendarRange,
   RotateCcw,
   Share2,
+  Copy,
+  Send,
+  Phone,
 } from 'lucide-react';
 import { isMariaOrFerCastil, isMaferCleaner } from '../lib/auth';
+import { resolveClientMemory } from '../lib/clientMemory';
+
+const normalizeDateKey = (dateVal) => {
+  if (!dateVal) return '';
+  const raw = String(dateVal).trim().split('T')[0].split(' ')[0];
+  const parts = raw.split('-');
+  if (parts.length === 3) {
+    const y = parts[0];
+    const m = String(Number(parts[1]) || 1).padStart(2, '0');
+    const d = String(Number(parts[2]) || 1).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return raw;
+};
 
 const MONTH_NAMES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -114,7 +131,7 @@ export default function ScheduleView({
   const [selectedCleanerFilter, setSelectedCleanerFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all'); // 'all' | 'services' | 'schedule'
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateFilterRange, setDateFilterRange] = useState('all'); // 'all' | 'upcoming' | 'today'
+  const [dateFilterRange, setDateFilterRange] = useState('selected'); // 'selected' | 'today' | 'upcoming' | 'all'
 
   // Modal State for adding new assignment / shift
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -126,20 +143,64 @@ export default function ScheduleView({
   const [duracionMinutos, setDuracionMinutos] = useState(0);
   const [unidad, setUnidad] = useState(availableUnits[0] || '');
   const [cleaner, setCleaner] = useState(availableCleaners[0] || '');
+  const [selectedModalCleaners, setSelectedModalCleaners] = useState(
+    availableCleaners[0] ? [availableCleaners[0]] : ['Maria']
+  );
   const [tipo, setTipo] = useState('Limpieza');
   const [notes, setNotes] = useState('');
+  const [modalLastServiceInfo, setModalLastServiceInfo] = useState(null);
   const [copiedShiftId, setCopiedShiftId] = useState(null);
+
+  // WhatsApp Cleaner Agenda Modal State (Next Week / Month / Custom)
+  const [isWaAgendaOpen, setIsWaAgendaOpen] = useState(false);
+  const [waCleaner, setWaCleaner] = useState(() =>
+    isCleaner ? cleanerName : isSupervisorFer ? 'Maria' : (availableCleaners[0] || 'Mafer')
+  );
+  const [waPeriod, setWaPeriod] = useState('next_week'); // 'next_week' | 'current_week' | 'current_month' | 'next_month' | 'custom'
+  const [waCustomStart, setWaCustomStart] = useState(todayStr);
+  const [waCustomEnd, setWaCustomEnd] = useState(todayStr);
+  const [waPhoneInput, setWaPhoneInput] = useState('');
+  const [waCopied, setWaCopied] = useState(false);
+
+  const getCleanerPhoneFromDb = (targetCleanerName) => {
+    if (!targetCleanerName) return '';
+    const cleanerObj = (cleanersDb || []).find((c) => {
+      const n = typeof c === 'string' ? c : c?.name;
+      return (n || '').trim().toLowerCase() === targetCleanerName.trim().toLowerCase();
+    });
+    return typeof cleanerObj === 'object' && cleanerObj?.phone
+      ? String(cleanerObj.phone).replace(/\D/g, '')
+      : '';
+  };
+
+  const handleOpenWaAgendaModal = (targetCleaner = null, initialPeriod = 'next_week') => {
+    const chosenCleaner =
+      targetCleaner && targetCleaner !== 'all'
+        ? targetCleaner
+        : selectedCleanerFilter !== 'all'
+        ? selectedCleanerFilter
+        : isCleaner
+        ? cleanerName
+        : isSupervisorFer
+        ? 'Maria'
+        : availableCleaners[0] || 'Mafer';
+
+    setWaCleaner(chosenCleaner);
+    setWaPeriod(initialPeriod);
+    setWaPhoneInput(getCleanerPhoneFromDb(chosenCleaner));
+    setWaCopied(false);
+
+    // Also sync the calendar cleaner filter so the user sees that cleaner's schedule filtered on screen
+    if (isMasterAdmin && chosenCleaner) {
+      setSelectedCleanerFilter(chosenCleaner);
+    }
+    setIsWaAgendaOpen(true);
+  };
 
   const handleShareWhatsAppShift = (item) => {
     const cleanersStr = (item.cleaners && item.cleaners.length ? item.cleaners : [item.cleaner]).join(', ');
     const primaryCleaner = item.cleaner || (item.cleaners && item.cleaners[0]) || '';
-    
-    // Find cleaner phone if registered
-    const cleanerObj = (cleanersDb || []).find((c) => {
-      const n = typeof c === 'string' ? c : c?.name;
-      return (n || '').trim().toLowerCase() === primaryCleaner.trim().toLowerCase();
-    });
-    const rawPhone = typeof cleanerObj === 'object' && cleanerObj?.phone ? String(cleanerObj.phone).replace(/\D/g, '') : '';
+    const rawPhone = getCleanerPhoneFromDb(primaryCleaner);
 
     let text = `🧹 *WHITEGLOVE - TURNO DE LIMPIEZA*\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -154,22 +215,25 @@ export default function ScheduleView({
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `_Favor de confirmar de recibido en WhatsApp._`;
 
+    try {
+      navigator.clipboard?.writeText(text);
+      setCopiedShiftId(item.id);
+      setTimeout(() => setCopiedShiftId(null), 3000);
+    } catch {}
+
     const url = rawPhone
       ? `https://wa.me/${rawPhone}?text=${encodeURIComponent(text)}`
       : `https://wa.me/?text=${encodeURIComponent(text)}`;
 
     try {
-      const win = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!win) {
-        navigator.clipboard.writeText(text);
-        setCopiedShiftId(item.id);
-        setTimeout(() => setCopiedShiftId(null), 3000);
-      }
-    } catch {
-      navigator.clipboard.writeText(text);
-      setCopiedShiftId(item.id);
-      setTimeout(() => setCopiedShiftId(null), 3000);
-    }
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {}
   };
 
   // Robust cleaner matching function that handles single strings, arrays, objects, and legacy keys
@@ -243,14 +307,15 @@ export default function ScheduleView({
         ? s.cleaners
         : (s.cleaner ? [s.cleaner] : []);
       const primaryCleaner = cls[0] || 'Sin asignar';
-      const isPast = s.fecha < todayStr;
+      const normFecha = normalizeDateKey(s.fecha);
+      const isPast = normFecha < todayStr;
       const isCancelled = s.status === 'cancelado';
 
       return {
         id: `svc-${s.id}`,
         rawId: s.id,
         isRegisteredService: true,
-        fecha: s.fecha,
+        fecha: normFecha,
         hora: s.hora || '09:00',
         unidad: s.unidad,
         cleaners: cls,
@@ -272,12 +337,14 @@ export default function ScheduleView({
         ? sc.cleaners
         : (sc.cleaner ? [sc.cleaner] : []);
       const primaryCleaner = cls[0] || 'Sin asignar';
+      const normFecha = normalizeDateKey(sc.fecha);
       const isDone = sc.estado === 'completado' || sc.status === 'completed';
       const isCancelled = sc.estado === 'cancelado' || sc.status === 'cancelled';
 
       return {
         ...sc,
         id: sc.id,
+        fecha: normFecha,
         isRegisteredService: false,
         cleaners: cls,
         cleaner: primaryCleaner,
@@ -346,14 +413,7 @@ export default function ScheduleView({
       if (sourceFilter === 'services' && !item.isRegisteredService) return false;
       if (sourceFilter === 'schedule' && item.isRegisteredService) return false;
 
-      // 4. Date range filter (for cards view)
-      if (dateFilterRange === 'today') {
-        if (item.fecha !== todayStr) return false;
-      } else if (dateFilterRange === 'upcoming') {
-        if (item.fecha < todayStr) return false;
-      }
-
-      // 5. Search Filter (Cliente, Cleaner, Tipo, Notas)
+      // 4. Search Filter (Cliente, Cleaner, Tipo, Notas)
       if (searchTerm && searchTerm.trim()) {
         const term = searchTerm.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
         const unitName = (item.unidad || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -374,24 +434,55 @@ export default function ScheduleView({
 
       return true;
     });
-  }, [unifiedCalendarItems, isCleaner, cleanerName, selectedCleanerFilter, statusFilter, sourceFilter, dateFilterRange, searchTerm, todayStr]);
+  }, [unifiedCalendarItems, isMasterAdmin, isSupervisorFer, cleanerName, selectedCleanerFilter, statusFilter, sourceFilter, searchTerm]);
 
-  // Map of date string -> array of items for rapid calendar lookup
+  // Map of normalized date string -> array of items strictly for that exact date
   const itemsByDate = useMemo(() => {
     const map = {};
     filteredItems.forEach((item) => {
-      if (!map[item.fecha]) {
-        map[item.fecha] = [];
+      const dKey = normalizeDateKey(item.fecha);
+      if (!dKey) return;
+      if (!map[dKey]) {
+        map[dKey] = [];
       }
-      map[item.fecha].push(item);
+      map[dKey].push(item);
     });
     return map;
   }, [filteredItems]);
 
-  // Selected Day Items
+  // Strictly ONLY the available services/shifts for the currently selected day (selectedDate)
   const selectedDayItems = useMemo(() => {
-    return itemsByDate[selectedDate] || [];
-  }, [itemsByDate, selectedDate]);
+    const targetDayKey = normalizeDateKey(selectedDate);
+    if (!targetDayKey) return [];
+    const dayList = (itemsByDate[targetDayKey] || []).filter(
+      (item) => normalizeDateKey(item.fecha) === targetDayKey
+    );
+    // If statusFilter is 'all', hide cancelled services from the active daily agenda unless explicitly viewing 'cancelled'
+    if (statusFilter === 'all') {
+      return dayList.filter(
+        (item) => item.status !== 'cancelled' && item.estado !== 'cancelado'
+      );
+    }
+    return dayList;
+  }, [itemsByDate, selectedDate, statusFilter]);
+
+  // Filtered items for the Cards View (defaults strictly to the selected day!)
+  const cardsViewItems = useMemo(() => {
+    const targetDayKey = normalizeDateKey(selectedDate);
+    return filteredItems.filter((item) => {
+      const itemDateKey = normalizeDateKey(item.fecha);
+      if (dateFilterRange === 'selected') {
+        return itemDateKey === targetDayKey;
+      }
+      if (dateFilterRange === 'today') {
+        return itemDateKey === todayStr;
+      }
+      if (dateFilterRange === 'upcoming') {
+        return itemDateKey >= todayStr;
+      }
+      return true;
+    });
+  }, [filteredItems, dateFilterRange, selectedDate, todayStr]);
 
   // Selected day metrics
   const selectedDayStats = useMemo(() => {
@@ -506,23 +597,273 @@ export default function ScheduleView({
     return weekDays;
   }, [selectedDate, todayStr, itemsByDate]);
 
-  // Open modal prefilled with selected date
+  // Date range helper for Cleaner WhatsApp Agenda (Current Week, Next Week, Current Month, Next Month, Custom)
+  const formatYMD = (dateObj) => {
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const getAgendaDateRange = (periodKey) => {
+    const baseStr = selectedDate || todayStr;
+    const [bY, bM, bD] = baseStr.split('-').map(Number);
+    const baseDate = new Date(bY, (bM || 1) - 1, bD || 1);
+    const dayOfWeek = (baseDate.getDay() + 6) % 7; // 0 = Monday
+
+    if (periodKey === 'current_week') {
+      const mon = new Date(baseDate);
+      mon.setDate(baseDate.getDate() - dayOfWeek);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      const start = formatYMD(mon);
+      const end = formatYMD(sun);
+      return {
+        start,
+        end,
+        label: `Esta Semana (${mon.getDate()} ${MONTH_NAMES[mon.getMonth()].substring(0, 3)} – ${sun.getDate()} ${MONTH_NAMES[sun.getMonth()].substring(0, 3)} ${sun.getFullYear()})`,
+      };
+    }
+
+    if (periodKey === 'next_week') {
+      // Next week relative to today or selected date's Monday + 7 days
+      const [tY, tM, tD] = todayStr.split('-').map(Number);
+      const todayObj = new Date(tY, (tM || 1) - 1, tD || 1);
+      const todayDow = (todayObj.getDay() + 6) % 7;
+      const nextMon = new Date(todayObj);
+      nextMon.setDate(todayObj.getDate() - todayDow + 7);
+      const nextSun = new Date(nextMon);
+      nextSun.setDate(nextMon.getDate() + 6);
+      const start = formatYMD(nextMon);
+      const end = formatYMD(nextSun);
+      return {
+        start,
+        end,
+        label: `Siguiente Semana (${nextMon.getDate()} ${MONTH_NAMES[nextMon.getMonth()].substring(0, 3)} – ${nextSun.getDate()} ${MONTH_NAMES[nextSun.getMonth()].substring(0, 3)} ${nextSun.getFullYear()})`,
+      };
+    }
+
+    if (periodKey === 'current_month') {
+      const y = currentDate.getFullYear();
+      const m = currentDate.getMonth();
+      const first = new Date(y, m, 1);
+      const last = new Date(y, m + 1, 0);
+      return {
+        start: formatYMD(first),
+        end: formatYMD(last),
+        label: `Mes de ${MONTH_NAMES[m]} ${y}`,
+      };
+    }
+
+    if (periodKey === 'next_month') {
+      const y = currentDate.getFullYear();
+      const m = currentDate.getMonth() + 1;
+      const first = new Date(y, m, 1);
+      const last = new Date(y, m + 1, 0);
+      return {
+        start: formatYMD(first),
+        end: formatYMD(last),
+        label: `Mes de ${MONTH_NAMES[first.getMonth()]} ${first.getFullYear()}`,
+      };
+    }
+
+    // custom
+    const s = normalizeDateKey(waCustomStart || todayStr);
+    const e = normalizeDateKey(waCustomEnd || todayStr);
+    return {
+      start: s <= e ? s : e,
+      end: s <= e ? e : s,
+      label: `Del ${s} al ${e}`,
+    };
+  };
+
+  // Get active (non-cancelled) items for a specific cleaner & period
+  const getCleanerItemsForPeriod = (targetCleanerName, periodKey) => {
+    if (!targetCleanerName || targetCleanerName === 'all') return [];
+    const { start, end } = getAgendaDateRange(periodKey);
+    return unifiedCalendarItems.filter((item) => {
+      if (item.status === 'cancelled' || item.estado === 'cancelado') return false;
+      const dKey = normalizeDateKey(item.fecha);
+      if (!dKey || dKey < start || dKey > end) return false;
+      return cleanerMatches(item, targetCleanerName);
+    });
+  };
+
+  // Helper to get the specific cleaner's hours on an item (supports horasPorCleaner)
+  const getCleanerSpecificHours = (item, targetCleanerName) => {
+    const svc = item.originalService || item;
+    if (svc?.horasPorCleaner && targetCleanerName) {
+      const foundKey = Object.keys(svc.horasPorCleaner).find(
+        (k) => k.trim().toLowerCase() === targetCleanerName.trim().toLowerCase()
+      );
+      if (foundKey && Number(svc.horasPorCleaner[foundKey]) > 0) {
+        return Number(svc.horasPorCleaner[foundKey]);
+      }
+    }
+    return Number(item.horas) || 2;
+  };
+
+  // Computed WhatsApp Agenda data for the modal
+  const waAgendaData = useMemo(() => {
+    const range = getAgendaDateRange(waPeriod);
+    const items = getCleanerItemsForPeriod(waCleaner, waPeriod);
+    const totalHours = items.reduce(
+      (sum, it) => sum + getCleanerSpecificHours(it, waCleaner),
+      0
+    );
+
+    // Group items by date
+    const groupedByDate = {};
+    items.forEach((it) => {
+      const d = normalizeDateKey(it.fecha);
+      if (!groupedByDate[d]) groupedByDate[d] = [];
+      groupedByDate[d].push(it);
+    });
+
+    let msg = `🧹 *WHITEGLOVE CLEANING — AGENDA DE SERVICIOS*\n`;
+    msg += `👤 *Cleaner:* ${waCleaner}\n`;
+    msg += `📅 *Periodo:* ${range.label}\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    const dateKeys = Object.keys(groupedByDate).sort();
+    if (dateKeys.length === 0) {
+      msg += `_Por el momento no hay servicios programados en este periodo._\n\n`;
+    } else {
+      dateKeys.forEach((dKey) => {
+        msg += `📌 *${formatFullDateHeader(dKey)}*\n`;
+        groupedByDate[dKey].forEach((it) => {
+          const clHrs = getCleanerSpecificHours(it, waCleaner);
+          const companions = (it.cleaners || [it.cleaner]).filter(
+            (c) => c && c.trim().toLowerCase() !== (waCleaner || '').trim().toLowerCase()
+          );
+          const cleanNote = String(it.notas || '')
+            .replace(/^\[Duración:[^\]]+\]\s*/i, '')
+            .replace(/^Servicio registrado en sistema$/i, '')
+            .replace(/^Capturista:.*$/i, '')
+            .trim();
+
+          msg += `• ⏰ *${it.hora || '09:00'}* | 📍 *${it.unidad}*\n`;
+          msg += `  🧹 ${it.tipo || 'Limpieza'} · ⏱️ ${clHrs} hrs`;
+          if (companions.length > 0) {
+            msg += ` · 👥 Con: ${companions.join(', ')}`;
+          }
+          msg += `\n`;
+          if (cleanNote) {
+            msg += `  📝 _${cleanNote}_\n`;
+          }
+        });
+        msg += `\n`;
+      });
+    }
+
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📊 *Total en el periodo:* ${items.length} ${items.length === 1 ? 'servicio' : 'servicios'} (${parseFloat(totalHours.toFixed(2))} hrs est.)\n`;
+    msg += `_Favor de confirmar de recibido tu agenda por WhatsApp. ¡Gracias!_`;
+
+    const cleanPhone = String(waPhoneInput || '').replace(/\D/g, '');
+    const waUrl = cleanPhone
+      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+
+    return {
+      range,
+      items,
+      totalHours: parseFloat(totalHours.toFixed(2)),
+      message: msg,
+      waUrl,
+    };
+  }, [waCleaner, waPeriod, waCustomStart, waCustomEnd, waPhoneInput, unifiedCalendarItems, currentDate, selectedDate, todayStr]);
+
+  // Helper to split decimal hours into whole hours and snapped minutes (0, 15, 30, 45)
+  const splitScheduleHours = (decVal) => {
+    const num = Math.max(0, Number(decVal) || 2);
+    const whole = Math.floor(num);
+    const rawMins = Math.round((num - whole) * 60);
+    const validMins = [0, 15, 30, 45];
+    const snapped = validMins.reduce(
+      (prev, curr) => (Math.abs(curr - rawMins) < Math.abs(prev - rawMins) ? curr : prev),
+      0
+    );
+    return { h: whole, m: snapped };
+  };
+
+  // Auto-fill modal state from the selected client's last service
+  const applyClientLastServiceToModal = (targetUnit) => {
+    setUnidad(targetUnit);
+    if (!targetUnit) {
+      setModalLastServiceInfo(null);
+      return;
+    }
+    const mem = resolveClientMemory(targetUnit, services, null, schedule);
+    if (mem && (mem.lastService || mem.isRecurring)) {
+      const { h, m } = splitScheduleHours(mem.horas || 2);
+      setDuracionHoras(h);
+      setDuracionMinutos(m);
+      setTipo(mem.tipo || 'Limpieza');
+      setHora(mem.hora || '09:00');
+      if (mem.notes) {
+        setNotes(mem.notes);
+      }
+
+      if (isCleaner) {
+        setCleaner(cleanerName);
+        setSelectedModalCleaners([cleanerName]);
+      } else if (isSupervisorFer) {
+        setCleaner('Maria');
+        setSelectedModalCleaners(['Maria']);
+      } else if (mem.cleaners && mem.cleaners.length > 0) {
+        setCleaner(mem.cleaners[0]);
+        setSelectedModalCleaners(mem.cleaners);
+      }
+      setModalLastServiceInfo(mem);
+    } else {
+      setModalLastServiceInfo(null);
+    }
+  };
+
+  // Open modal prefilled with selected date and auto-filled from initial client's last service
   const handleOpenModalForDate = (targetDate = selectedDate) => {
+    const initialUnit = availableUnits[0] || '';
     setFecha(targetDate || todayStr);
     setHora('09:00');
     setDuracionHoras(2);
     setDuracionMinutos(0);
-    setUnidad(availableUnits[0] || '');
-    setCleaner(isCleaner ? cleanerName : (availableCleaners[0] || ''));
+    setUnidad(initialUnit);
+    const defaultCl = isCleaner ? cleanerName : isSupervisorFer ? 'Maria' : (availableCleaners[0] || 'Maria');
+    setCleaner(defaultCl);
+    setSelectedModalCleaners([defaultCl]);
     setTipo('Limpieza');
     setNotes('');
+    if (initialUnit) {
+      applyClientLastServiceToModal(initialUnit);
+    }
     setIsModalOpen(true);
+  };
+
+  const handleToggleModalCleaner = (cName) => {
+    if (isCleaner) return;
+    setSelectedModalCleaners((prev) => {
+      let next;
+      if (prev.includes(cName)) {
+        if (prev.length === 1) return prev;
+        next = prev.filter((c) => c !== cName);
+      } else {
+        next = [...prev, cName];
+      }
+      setCleaner(next[0] || cName);
+      return next;
+    });
   };
 
   // Submit Handler for Manual Shift
   const handleCreate = (e) => {
     e.preventDefault();
-    const assignedCleaner = isCleaner ? cleanerName : cleaner;
+    const assignedCleaners = isCleaner
+      ? [cleanerName]
+      : selectedModalCleaners.length > 0
+      ? selectedModalCleaners
+      : [cleaner || availableCleaners[0] || 'Maria'];
+    const assignedPrimary = assignedCleaners[0];
     const durMin = Number(duracionMinutos) || 0;
     const durHrs = Number(duracionHoras) || 0;
     const totalDecimalHours = parseFloat((durHrs + durMin / 60).toFixed(2));
@@ -536,8 +877,8 @@ export default function ScheduleView({
       fecha,
       hora,
       unidad,
-      cleaners: [assignedCleaner],
-      cleaner: assignedCleaner,
+      cleaners: assignedCleaners,
+      cleaner: assignedPrimary,
       tipo,
       notas: fullNotes,
       estado: 'programado',
@@ -628,14 +969,18 @@ export default function ScheduleView({
           {/* Quick Capture / Add Buttons */}
           {onOpenNewService && (
             <button
-              onClick={() => onOpenNewService({
-                fecha: selectedDate || todayStr,
-                cleaner: isCleaner ? cleanerName : (isSupervisorFer ? 'Maria' : (availableCleaners[0] || '')),
-                cleaners: isCleaner ? [cleanerName] : (isSupervisorFer ? ['Maria'] : (availableCleaners[0] ? [availableCleaners[0]] : [])),
-                tipo: 'Limpieza',
-              })}
+              onClick={() =>
+                onOpenNewService({
+                  fecha: selectedDate || todayStr,
+                  ...(isCleaner
+                    ? { cleaner: cleanerName, cleaners: [cleanerName], explicitCleaners: true }
+                    : isSupervisorFer
+                    ? { cleaner: 'Maria', cleaners: ['Maria'], explicitCleaners: true }
+                    : {}),
+                })
+              }
               className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#0B1D4A] hover:bg-[#1E3670] text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer active:scale-98"
-              title="Capturar servicio completo con cobro y nómina"
+              title="Capturar servicio completo con relleno automático del último servicio del cliente"
             >
               <Sparkles className="w-3.5 h-3.5 text-[#FFB566]" />
               <span className="hidden sm:inline">+ Capturar Servicio</span>
@@ -672,7 +1017,7 @@ export default function ScheduleView({
                   : 'bg-slate-100 text-slate-600 hover:text-slate-900 hover:bg-slate-200'
               }`}
             >
-              Todos ({filteredItems.length})
+              Disponibles en el Día ({selectedDayItems.length})
             </button>
             <button
               onClick={() => setStatusFilter('pending')}
@@ -709,31 +1054,124 @@ export default function ScheduleView({
             </button>
           </div>
 
-          {/* Cleaner Filter (Exclusively for Master Administrators Michelle and Fernando) */}
-          {isMasterAdmin ? (
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-700 flex items-center gap-1 text-xs">
-                <Users className="w-3.5 h-3.5 text-slate-400" />
-                Cleaner:
-              </span>
-              <select
-                value={selectedCleanerFilter}
-                onChange={(e) => setSelectedCleanerFilter(e.target.value)}
-                className="px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white font-bold text-[#0B1D4A] focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
-              >
-                <option value="all">👥 Todos los Cleaners</option>
-                {availableCleaners.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-[#FAF7F1] border border-[#E8DFC8] rounded-xl text-xs font-bold text-[#0B1D4A] shadow-2xs">
-              <User className="w-3.5 h-3.5 text-[#FFB566]" />
-              <span>{isSupervisorFer ? 'Mis Servicios (María - Fer Castil)' : `Mis Servicios (${cleanerName})`}</span>
-            </div>
-          )}
+          {/* Cleaner Filter + WhatsApp Agenda Button */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {isMasterAdmin ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-slate-700 flex items-center gap-1 text-xs">
+                  <Users className="w-3.5 h-3.5 text-slate-400" />
+                  Cleaner:
+                </span>
+                <select
+                  value={selectedCleanerFilter}
+                  onChange={(e) => setSelectedCleanerFilter(e.target.value)}
+                  className="px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white font-bold text-[#0B1D4A] focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
+                >
+                  <option value="all">👥 Todos los Cleaners</option>
+                  {availableCleaners.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-[#FAF7F1] border border-[#E8DFC8] rounded-xl text-xs font-bold text-[#0B1D4A] shadow-2xs">
+                <User className="w-3.5 h-3.5 text-[#FFB566]" />
+                <span>{isSupervisorFer ? 'Mis Servicios (María - Fer Castil)' : `Mis Servicios (${cleanerName})`}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() =>
+                handleOpenWaAgendaModal(
+                  selectedCleanerFilter !== 'all' ? selectedCleanerFilter : null,
+                  'next_week'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all cursor-pointer active:scale-98"
+              title="Filtrar y enviar por WhatsApp la agenda de la siguiente semana o del mes a cada cleaner"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Enviar Agenda WhatsApp</span>
+            </button>
+          </div>
         </div>
+
+        {/* Quick Clickable Cleaner Filter Pills for Master Admin */}
+        {isMasterAdmin && (
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-500 mr-1">
+                Filtrar por Cleaner:
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedCleanerFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  selectedCleanerFilter === 'all'
+                    ? 'bg-[#0B1D4A] text-[#FFB566] shadow-2xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Todos
+              </button>
+              {availableCleaners.map((c) => {
+                const isSelected = selectedCleanerFilter === c;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setSelectedCleanerFilter(c)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      isSelected
+                        ? 'bg-[#0B1D4A] text-[#FFB566] shadow-2xs ring-2 ring-[#FFB566]/50'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>{c}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedCleanerFilter !== 'all' && (
+              <div className="flex items-center gap-1.5 flex-wrap bg-emerald-50/90 border border-emerald-200 px-3 py-1.5 rounded-xl">
+                <span className="text-[11px] font-bold text-emerald-950">
+                  📲 Agenda de {selectedCleanerFilter}:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleOpenWaAgendaModal(selectedCleanerFilter, 'next_week')}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                >
+                  <Share2 className="w-3 h-3" />
+                  <span>Siguiente Semana ({getCleanerItemsForPeriod(selectedCleanerFilter, 'next_week').length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenWaAgendaModal(selectedCleanerFilter, 'current_week')}
+                  className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-bold transition-all cursor-pointer"
+                >
+                  Esta Semana ({getCleanerItemsForPeriod(selectedCleanerFilter, 'current_week').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenWaAgendaModal(selectedCleanerFilter, 'current_month')}
+                  className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-bold transition-all cursor-pointer"
+                >
+                  Mes de {MONTH_NAMES[currentDate.getMonth()]} ({getCleanerItemsForPeriod(selectedCleanerFilter, 'current_month').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenWaAgendaModal(selectedCleanerFilter, 'next_month')}
+                  className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-bold transition-all cursor-pointer"
+                >
+                  Próximo Mes ({getCleanerItemsForPeriod(selectedCleanerFilter, 'next_month').length})
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Secondary Row: Search input and origin pills */}
         <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap text-xs">
@@ -972,22 +1410,46 @@ export default function ScheduleView({
             
             {/* Inspector Header */}
             <div className="border-b border-slate-100 pb-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#FFB566] bg-[#0B1D4A] px-2.5 py-0.5 rounded-full">
-                  Agenda del Día
+                  Agenda del Día (Solo Día Seleccionado)
                 </span>
-                <button
-                  onClick={() => handleOpenModalForDate(selectedDate)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-[#0B1D4A] bg-[#FFB566] hover:bg-[#E89A45] rounded-xl transition-all shadow-2xs"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                  <span>Agendar Turno</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {onOpenNewService && (
+                    <button
+                      onClick={() =>
+                        onOpenNewService({
+                          fecha: selectedDate || todayStr,
+                          ...(isCleaner
+                            ? { cleaner: cleanerName, cleaners: [cleanerName], explicitCleaners: true }
+                            : isSupervisorFer
+                            ? { cleaner: 'Maria', cleaners: ['Maria'], explicitCleaners: true }
+                            : {}),
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-[#0B1D4A] hover:bg-[#1E3670] rounded-xl transition-all shadow-2xs cursor-pointer"
+                      title="Agregar servicio para este día con autorrelleno del último servicio"
+                    >
+                      <Sparkles className="w-3 h-3 text-[#FFB566]" />
+                      <span>+ Servicio</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleOpenModalForDate(selectedDate)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-[#0B1D4A] bg-[#FFB566] hover:bg-[#E89A45] rounded-xl transition-all shadow-2xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                    <span>Agendar Turno</span>
+                  </button>
+                </div>
               </div>
 
               <h3 className="text-base font-serif font-bold text-[#0B1D4A] mt-2 leading-tight">
                 {formatFullDateHeader(selectedDate)}
               </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Mostrando únicamente los {selectedDayItems.length} servicio(s) de esta fecha.
+              </p>
 
               {/* Day Metrics Strip */}
               <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100 text-center">
@@ -1138,13 +1600,9 @@ export default function ScheduleView({
                           {!item.isRegisteredService && (
                             <button
                               type="button"
-                              onClick={() => {
-                                if (window.confirm('¿Deseas eliminar este turno de la agenda?')) {
-                                  onDeleteSchedule(item.id);
-                                }
-                              }}
+                              onClick={() => onDeleteSchedule(item.id)}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              title="Eliminar turno"
+                              title="Eliminar turno de la agenda"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1266,16 +1724,27 @@ export default function ScheduleView({
       {/* 5. CARDS GRID VIEW */}
       {viewMode === 'cards' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <span className="text-xs text-slate-500 font-medium">
-              Viendo <strong className="text-slate-800">{filteredItems.length}</strong> turnos y servicios
+              Viendo <strong className="text-slate-800">{cardsViewItems.length}</strong> turnos y servicios{' '}
+              {dateFilterRange === 'selected' && (
+                <span>
+                  del día seleccionado (<strong className="text-[#0B1D4A]">{formatDisplayDate(selectedDate, todayStr)}</strong>)
+                </span>
+              )}
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => setDateFilterRange('all')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold ${dateFilterRange === 'all' ? 'bg-[#0B1D4A] text-white' : 'bg-slate-100 text-slate-600'}`}
+                onClick={() => setDateFilterRange('selected')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold ${dateFilterRange === 'selected' ? 'bg-[#0B1D4A] text-[#FFB566]' : 'bg-slate-100 text-slate-600'}`}
               >
-                Todos
+                Solo Día Seleccionado ({selectedDayItems.length})
+              </button>
+              <button
+                onClick={() => setDateFilterRange('today')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold ${dateFilterRange === 'today' ? 'bg-[#0B1D4A] text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                Hoy
               </button>
               <button
                 onClick={() => setDateFilterRange('upcoming')}
@@ -1284,16 +1753,16 @@ export default function ScheduleView({
                 Próximos
               </button>
               <button
-                onClick={() => setDateFilterRange('today')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold ${dateFilterRange === 'today' ? 'bg-[#0B1D4A] text-white' : 'bg-slate-100 text-slate-600'}`}
+                onClick={() => setDateFilterRange('all')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold ${dateFilterRange === 'all' ? 'bg-[#0B1D4A] text-white' : 'bg-slate-100 text-slate-600'}`}
               >
-                Hoy
+                Todos
               </button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredItems.map((item) => {
+            {cardsViewItems.map((item) => {
               const isDone = item.estado === 'completado' || item.status === 'completed';
               const isCancelled = item.estado === 'cancelado' || item.status === 'cancelled';
               const itemCleaners = item.cleaners || [item.cleaner];
@@ -1429,11 +1898,7 @@ export default function ScheduleView({
                       {!item.isRegisteredService && (
                         <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm('¿Confirmas que deseas eliminar este turno de la agenda?')) {
-                              onDeleteSchedule(item.id);
-                            }
-                          }}
+                          onClick={() => onDeleteSchedule(item.id)}
                           className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
                           title="Eliminar de la agenda"
                         >
@@ -1449,7 +1914,7 @@ export default function ScheduleView({
         </div>
       )}
 
-      {/* 6. MODAL TO ADD NEW SCHEDULE SHIFT */}
+      {/* 6. MODAL TO ADD NEW SCHEDULE SHIFT (AUTO-FILLS FROM CLIENT'S LAST SERVICE) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden">
@@ -1457,7 +1922,7 @@ export default function ScheduleView({
               <div className="flex items-center gap-2">
                 <CalendarIcon className="w-5 h-5 text-[#FFB566]" />
                 <h3 className="font-serif font-bold text-base text-[#FAF7F1]">
-                  Agendar Turno de Limpieza
+                  Agendar Servicio / Turno en Calendario
                 </h3>
               </div>
               <button
@@ -1468,7 +1933,84 @@ export default function ScheduleView({
               </button>
             </div>
 
-            <form onSubmit={handleCreate} className="p-6 space-y-4 text-xs">
+            <form onSubmit={handleCreate} className="p-6 space-y-4 text-xs max-h-[85vh] overflow-y-auto">
+              {/* Auto-fill Banner from Last Service */}
+              {modalLastServiceInfo && (modalLastServiceInfo.lastService || modalLastServiceInfo.isRecurring) && (
+                <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex items-start gap-2.5 shadow-2xs">
+                  <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-bold block text-emerald-900">
+                      Información rellenada del último servicio con "{unidad}"
+                      {modalLastServiceInfo.lastServiceDate ? ` (${modalLastServiceInfo.lastServiceDate})` : ''}
+                    </span>
+                    <span className="text-[11px] text-emerald-800 block">
+                      Cleaner(s): <strong>{selectedModalCleaners.join(', ')}</strong> · Duración:{' '}
+                      <strong>
+                        {duracionHoras}h {duracionMinutos > 0 ? `${duracionMinutos}m` : ''}
+                      </strong>{' '}
+                      · Tipo: <strong>{tipo}</strong>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Unit / Residence (Placed first so selecting the client immediately fills the rest) */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">Cliente / Unidad / Residencia</label>
+                  {onAddClient && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddClientInSchedule(!showAddClientInSchedule)}
+                      className="text-[11px] font-bold text-[#0B1D4A] hover:text-[#1E3670] bg-[#FFB566]/20 border border-[#FFB566]/60 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                    >
+                      + Nuevo Cliente
+                    </button>
+                  )}
+                </div>
+
+                {showAddClientInSchedule && (
+                  <div className="mb-2 p-2.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-2">
+                    <span className="text-[11px] font-bold text-amber-950 block">Nombre del nuevo cliente / unidad:</span>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Ej: Mohammed o Phillys..."
+                        value={newScheduleClient}
+                        onChange={(e) => setNewScheduleClient(e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#0B1D4A]"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const trimmed = newScheduleClient.trim();
+                          if (trimmed) {
+                            await onAddClient(trimmed);
+                            applyClientLastServiceToModal(trimmed);
+                            setNewScheduleClient('');
+                            setShowAddClientInSchedule(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-[#0B1D4A] text-[#FFB566] text-xs font-bold rounded-lg hover:bg-[#1E3670] cursor-pointer"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <select
+                  value={unidad}
+                  onChange={(e) => applyClientLastServiceToModal(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
+                  required
+                >
+                  {availableUnits.map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+
               {/* Date & Start Time */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1495,7 +2037,7 @@ export default function ScheduleView({
 
               {/* Estimated Duration */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Duración Estimada</label>
+                <label className="block font-bold text-slate-700 mb-1">Duración Estimada (del último servicio)</label>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="flex items-center gap-1.5">
                     <input
@@ -1526,68 +2068,13 @@ export default function ScheduleView({
                 </div>
               </div>
 
-              {/* Unit / Residence */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-slate-700">Unidad / Residencia</label>
-                  {onAddClient && (
-                    <button
-                      type="button"
-                      onClick={() => setShowAddClientInSchedule(!showAddClientInSchedule)}
-                      className="text-[11px] font-bold text-[#0B1D4A] hover:text-[#1E3670] bg-[#FFB566]/20 border border-[#FFB566]/60 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
-                    >
-                      + Nuevo Cliente
-                    </button>
-                  )}
-                </div>
-
-                {showAddClientInSchedule && (
-                  <div className="mb-2 p-2.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-2">
-                    <span className="text-[11px] font-bold text-amber-950 block">Nombre del nuevo cliente / unidad:</span>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        placeholder="Ej: Mohammed o Phillys..."
-                        value={newScheduleClient}
-                        onChange={(e) => setNewScheduleClient(e.target.value)}
-                        className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#0B1D4A]"
-                      />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const trimmed = newScheduleClient.trim();
-                          if (trimmed) {
-                            await onAddClient(trimmed);
-                            setUnidad(trimmed);
-                            setNewScheduleClient('');
-                            setShowAddClientInSchedule(false);
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-[#0B1D4A] text-[#FFB566] text-xs font-bold rounded-lg hover:bg-[#1E3670] cursor-pointer"
-                      >
-                        Guardar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <select
-                  value={unidad}
-                  onChange={(e) => setUnidad(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
-                  required
-                >
-                  {availableUnits.map((u) => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Assigned Cleaner & Service Type */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Assigned Cleaners & Service Type */}
+              <div className="space-y-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="block font-bold text-slate-700">Cleaner Asignado</label>
+                    <label className="block font-bold text-slate-700">
+                      {isCleaner ? 'Cleaner Asignado' : `Cleaners Asignados (${selectedModalCleaners.length})`}
+                    </label>
                     {!isCleaner && onOpenAddCleaner && (
                       <button
                         type="button"
@@ -1605,16 +2092,25 @@ export default function ScheduleView({
                       <span className="text-[10px] bg-[#0B1D4A] text-white px-1.5 py-0.2 rounded font-semibold">Tú</span>
                     </div>
                   ) : (
-                    <select
-                      value={cleaner}
-                      onChange={(e) => setCleaner(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
-                      required
-                    >
-                      {availableCleaners.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
+                    <div className="flex flex-wrap gap-1.5 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl max-h-32 overflow-y-auto">
+                      {availableCleaners.map((c) => {
+                        const isSel = selectedModalCleaners.includes(c);
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => handleToggleModalCleaner(c)}
+                            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                              isSel
+                                ? 'bg-[#0B1D4A] text-[#FFB566] shadow-2xs'
+                                : 'bg-white text-slate-700 border border-slate-200 hover:border-slate-400'
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
 
@@ -1644,22 +2140,372 @@ export default function ScheduleView({
               </div>
 
               {/* Submit Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#0B1D4A] text-[#FFB566] font-bold shadow-xs hover:bg-[#1E3670]"
-                >
-                  Guardar Turno
-                </button>
+              <div className="pt-2 flex items-center justify-between gap-2 flex-wrap">
+                {onOpenNewService && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const totalDec = parseFloat((duracionHoras + duracionMinutos / 60).toFixed(2));
+                      setIsModalOpen(false);
+                      onOpenNewService({
+                        fecha,
+                        unidad,
+                        cleaners: selectedModalCleaners,
+                        cleaner: selectedModalCleaners[0] || cleaner,
+                        horas: totalDec,
+                        horasPorCleaner: modalLastServiceInfo?.horasPorCleaner || null,
+                        tipo,
+                      });
+                    }}
+                    className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold flex items-center gap-1 cursor-pointer"
+                    title="Abrir formulario de servicio completo con tarifas y horas por cleaner ya rellenadas"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Guardar como Servicio Completo</span>
+                  </button>
+                )}
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-3.5 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-[#0B1D4A] text-[#FFB566] font-bold shadow-xs hover:bg-[#1E3670] cursor-pointer"
+                  >
+                    Guardar Turno
+                  </button>
+                </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 7. MODAL TO FILTER & SEND CLEANER AGENDA VIA WHATSAPP (NEXT WEEK / MONTH) */}
+      {isWaAgendaOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 bg-[#0B1D4A] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300">
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base text-[#FAF7F1]">
+                    Enviar Agenda por WhatsApp a Cleaner
+                  </h3>
+                  <p className="text-[11px] text-slate-300">
+                    Filtra la agenda por cleaner (siguiente semana o mes) y envíala en un clic
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsWaAgendaOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-5 text-xs">
+              {/* Step 1: Select Cleaner */}
+              <div className="space-y-2">
+                <label className="block font-bold text-slate-700 text-xs">
+                  1. Selecciona el Cleaner para filtrar su agenda:
+                </label>
+                {isCleaner ? (
+                  <div className="px-3.5 py-2 bg-amber-50 border border-amber-300 rounded-xl font-bold text-[#0B1D4A] inline-flex items-center gap-2">
+                    <User className="w-4 h-4 text-[#0B1D4A]" />
+                    <span>{cleanerName}</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableCleaners.map((c) => {
+                      const isSel = waCleaner === c;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => {
+                            setWaCleaner(c);
+                            setWaPhoneInput(getCleanerPhoneFromDb(c));
+                            setWaCopied(false);
+                            if (isMasterAdmin) {
+                              setSelectedCleanerFilter(c);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            isSel
+                              ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs ring-2 ring-[#FFB566]/50'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center font-extrabold">
+                            {c.charAt(0)}
+                          </span>
+                          <span>{c}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 2: Select Period (Next Week, This Week, Current Month, Next Month, Custom) */}
+              <div className="space-y-2">
+                <label className="block font-bold text-slate-700 text-xs">
+                  2. Periodo de la Agenda a Enviar:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                  {[
+                    { id: 'next_week', label: 'Siguiente Semana', sub: 'Lun – Dom próx.' },
+                    { id: 'current_week', label: 'Esta Semana', sub: 'Semana actual' },
+                    {
+                      id: 'current_month',
+                      label: `Este Mes (${MONTH_NAMES[currentDate.getMonth()].substring(0, 3)})`,
+                      sub: 'Mes en pantalla',
+                    },
+                    {
+                      id: 'next_month',
+                      label: 'Siguiente Mes',
+                      sub: MONTH_NAMES[(currentDate.getMonth() + 1) % 12],
+                    },
+                    { id: 'custom', label: 'Personalizado', sub: 'Elegir fechas' },
+                  ].map((p) => {
+                    const isActive = waPeriod === p.id;
+                    const count = getCleanerItemsForPeriod(waCleaner, p.id).length;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setWaPeriod(p.id);
+                          setWaCopied(false);
+                        }}
+                        className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isActive
+                            ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/30 text-emerald-950'
+                            : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-bold text-xs leading-tight">{p.label}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                              isActive
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 mt-1">{p.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {waPeriod === 'custom' && (
+                  <div className="grid grid-cols-2 gap-3 pt-2 p-3 bg-slate-50 rounded-2xl border border-slate-200">
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[11px]">Desde:</label>
+                      <input
+                        type="date"
+                        value={waCustomStart}
+                        onChange={(e) => setWaCustomStart(e.target.value)}
+                        className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[11px]">Hasta:</label>
+                      <input
+                        type="date"
+                        value={waCustomEnd}
+                        onChange={(e) => setWaCustomEnd(e.target.value)}
+                        className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white font-semibold"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Optional Cleaner WhatsApp Phone Number */}
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <span className="font-bold text-slate-800 block">
+                      Teléfono WhatsApp de {waCleaner} (Opcional)
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Si lo ingresas, abrirá directo su chat; si lo dejas vacío, podrás elegir el contacto en WhatsApp.
+                    </span>
+                  </div>
+                </div>
+                <input
+                  type="tel"
+                  placeholder="Ej: 16475550123"
+                  value={waPhoneInput}
+                  onChange={(e) => setWaPhoneInput(e.target.value)}
+                  className="sm:w-44 px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                />
+              </div>
+
+              {/* Filtered Services Summary & Preview */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Left: Visual List of Shifts */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800">
+                      Servicios de {waCleaner} ({waAgendaData.items.length})
+                    </span>
+                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                      Total: {waAgendaData.totalHours} hrs
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 max-h-56 overflow-y-auto space-y-2">
+                    {waAgendaData.items.length === 0 ? (
+                      <div className="text-center py-8 text-slate-400 space-y-2">
+                        <CalendarIcon className="w-6 h-6 mx-auto text-slate-300" />
+                        <p className="font-semibold text-slate-600">
+                          No hay servicios registrados para {waCleaner} en este periodo
+                        </p>
+                        <p className="text-[11px]">
+                          ({waAgendaData.range.label})
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsWaAgendaOpen(false);
+                            handleOpenModalForDate(waAgendaData.range.start);
+                          }}
+                          className="mt-1 inline-flex items-center gap-1 px-2.5 py-1 bg-[#0B1D4A] text-[#FFB566] rounded-lg font-bold text-[11px] cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Agendar Turno en este Periodo</span>
+                        </button>
+                      </div>
+                    ) : (
+                      waAgendaData.items.map((it) => {
+                        const clHrs = getCleanerSpecificHours(it, waCleaner);
+                        return (
+                          <div
+                            key={it.id}
+                            className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#0B1D4A]">
+                                <span>{formatDisplayDate(it.fecha, todayStr)}</span>
+                                <span className="text-slate-400">·</span>
+                                <span className="text-emerald-700">{it.hora || '09:00'}</span>
+                              </div>
+                              <div className="font-bold text-xs text-slate-900 truncate mt-0.5">
+                                📍 {it.unidad}
+                              </div>
+                            </div>
+                            <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-800 font-bold text-[11px] shrink-0">
+                              {clHrs} hrs
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: WhatsApp Text Preview */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800">
+                      Vista Previa del Mensaje WhatsApp
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          navigator.clipboard?.writeText(waAgendaData.message);
+                          setWaCopied(true);
+                          setTimeout(() => setWaCopied(false), 3000);
+                        } catch {}
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>{waCopied ? '¡Texto Copiado!' : 'Copiar Texto'}</span>
+                    </button>
+                  </div>
+                  <textarea
+                    readOnly
+                    value={waAgendaData.message}
+                    rows={10}
+                    className="w-full p-3 rounded-2xl bg-emerald-950/5 border border-emerald-200 text-slate-800 font-mono text-[11px] leading-relaxed focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setIsWaAgendaOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+              >
+                Cerrar
+              </button>
+
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      navigator.clipboard?.writeText(waAgendaData.message);
+                      setWaCopied(true);
+                      setTimeout(() => setWaCopied(false), 3000);
+                    } catch {}
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-white hover:bg-slate-100 text-[#0B1D4A] border border-slate-300 transition-all cursor-pointer shadow-2xs"
+                >
+                  {waCopied ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span className="text-emerald-700">¡Agenda Copiada!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 text-slate-600" />
+                      <span>Copiar Agenda</span>
+                    </>
+                  )}
+                </button>
+
+                <a
+                  href={waAgendaData.waUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    try {
+                      navigator.clipboard?.writeText(waAgendaData.message);
+                      setWaCopied(true);
+                      setTimeout(() => setWaCopied(false), 3000);
+                    } catch {}
+                  }}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all cursor-pointer"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Enviar por WhatsApp a {waCleaner}</span>
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       )}

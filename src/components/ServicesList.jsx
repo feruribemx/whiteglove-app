@@ -643,18 +643,29 @@ export default function ServicesList({
                     {/* Cleaners */}
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
-                        {cleaners.map((c) => (
-                          <span
-                            key={c}
-                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                              isCancelled
-                                ? 'bg-slate-200 text-slate-500'
-                                : 'bg-slate-100 text-slate-800'
-                            }`}
-                          >
-                            {c}
-                          </span>
-                        ))}
+                        {cleaners.map((c) => {
+                          const clSpecificH =
+                            svc.horasPorCleaner && svc.horasPorCleaner[c] != null
+                              ? Number(svc.horasPorCleaner[c])
+                              : null;
+                          return (
+                            <span
+                              key={c}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                                isCancelled
+                                  ? 'bg-slate-200 text-slate-500'
+                                  : 'bg-slate-100 text-slate-800'
+                              }`}
+                            >
+                              <span>{c}</span>
+                              {clSpecificH != null && cleaners.length > 1 && (
+                                <span className="text-[10px] font-extrabold text-[#0B1D4A] bg-amber-100/80 px-1 rounded">
+                                  {formatHoursAndMinutes(clSpecificH)}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })}
                       </div>
                     </td>
 
@@ -666,10 +677,18 @@ export default function ServicesList({
                         <Clock className="w-3 h-3 text-slate-400" />
                         <span>{formattedDuration}</span>
                       </span>
-                      {Number(svc.horas) % 1 !== 0 && (
-                        <span className="text-[10px] text-slate-400 block mt-0.5">
-                          ({svc.horas}h)
+                      {cleaners.length > 1 && svc.horasPorCleaner && Object.keys(svc.horasPorCleaner).length > 1 ? (
+                        <span className="text-[10px] text-slate-500 font-semibold block mt-0.5">
+                          {cleaners
+                            .map((c) => `${c}: ${formatHoursAndMinutes(svc.horasPorCleaner[c] ?? svc.horas)}`)
+                            .join(' · ')}
                         </span>
+                      ) : (
+                        Number(svc.horas) % 1 !== 0 && (
+                          <span className="text-[10px] text-slate-400 block mt-0.5">
+                            ({svc.horas}h)
+                          </span>
+                        )
                       )}
                     </td>
 
@@ -837,6 +856,7 @@ export default function ServicesList({
                                   onOpenNewService({
                                     unidad: svc.unidad,
                                     horas: svc.horas,
+                                    horasPorCleaner: svc.horasPorCleaner,
                                     cleaner: svc.cleaner,
                                     cleaners: svc.cleaners,
                                     tipo: svc.tipo,

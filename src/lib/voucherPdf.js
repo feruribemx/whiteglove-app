@@ -18,6 +18,30 @@ export function generateCleanerVoucherHTML(cleanerData, periodLabel, paymentReco
   const totalServices = paymentRecord?.servicesCount != null ? paymentRecord.servicesCount : (cleanerData.totalServices || 0);
 
   const servicesRows = (cleanerData.servicesList || []).map((s, idx) => {
+    if (s.isAdjustmentRow) {
+      const signedVal = Number(s.subtotal) || 0;
+      const isNegative = signedVal < 0;
+      const signPrefix = isNegative ? '-' : '+';
+      const absVal = Math.abs(signedVal).toFixed(2);
+      const rowBg = isNegative ? 'background: #fff1f2;' : 'background: #ecfdf5;';
+      const textColor = isNegative ? '#be123c' : '#047857';
+      const badgeLabel = isNegative ? '➖ Deducción (-)' : '➕ Bono / Extra (+)';
+
+      return `
+        <tr style="${rowBg} border-bottom: 1px solid #e2e8f0; font-size: 11px;">
+          <td style="padding: 9px 12px; font-weight: 600;">${s.fecha || '—'}</td>
+          <td style="padding: 9px 12px; font-weight: 700; color: #0B1D4A;">${s.unidad || 'Ajuste de Nómina'}</td>
+          <td style="padding: 9px 12px; font-weight: 700; color: ${textColor};">${s.tipo || badgeLabel}</td>
+          <td style="padding: 9px 12px; text-align: center; color: #64748b;">Ajuste</td>
+          <td style="padding: 9px 12px; text-align: right; color: #64748b;">—</td>
+          <td style="padding: 9px 12px; text-align: right; font-weight: 700; color: ${textColor};">${signPrefix}$${absVal}</td>
+          <td style="padding: 9px 12px; text-align: right; color: #64748b;">—</td>
+          <td style="padding: 9px 12px; text-align: right; font-weight: 800; color: ${textColor};">${signPrefix}$${absVal} CAD</td>
+          <td style="padding: 9px 12px; text-align: center;"><span style="color: ${textColor}; font-weight: 700;">${badgeLabel}</span></td>
+        </tr>
+      `;
+    }
+
     const isCancelled = s.status === 'cancelado';
     const isAlreadyPaid = Boolean(s.isAlreadyPaid);
 
@@ -41,7 +65,7 @@ export function generateCleanerVoucherHTML(cleanerData, periodLabel, paymentReco
         <td style="padding: 9px 12px;">${s.tipo || 'Limpieza'}</td>
         <td style="padding: 9px 12px; text-align: center; font-weight: 600;">${(Number(s.horas) || 0).toFixed(1)} hrs</td>
         <td style="padding: 9px 12px; text-align: right;">$${s.rate != null ? Number(s.rate).toFixed(2) : '18.00'}</td>
-        <td style="padding: 9px 12px; text-align: right; font-weight: 600;">$${(Number(s.cleanerPay) || Number(s.subtotal) || 0).toFixed(2)}</td>
+        <td style="padding: 9px 12px; text-align: right; font-weight: 600;">$${(Number(s.cleanerPay) || Number(s.pagoBase) || Number(s.subtotal) || 0).toFixed(2)}</td>
         <td style="padding: 9px 12px; text-align: right; color: #b45309; font-weight: 600;">+$${(Number(s.tip) || 0).toFixed(2)}</td>
         <td style="padding: 9px 12px; text-align: right; font-weight: 700; color: #0B1D4A;">$${(Number(s.subtotal) || 0).toFixed(2)} CAD</td>
         <td style="padding: 9px 12px; text-align: center;">${statusBadge}</td>

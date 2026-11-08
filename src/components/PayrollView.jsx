@@ -3,7 +3,7 @@ import {
   DollarSign, Download, Users, Clock, Search, Gift,
   Calendar, Check, Copy, UserCheck, ChevronRight, ChevronLeft,
   Sparkles, ArrowLeft, CheckCircle2, Building2, Printer,
-  Share2, Camera, Eye, Filter, ArrowRight, Edit2, Ban, Plus, RotateCcw,
+  Share2, Camera, Eye, Filter, ArrowRight, Edit2, Ban, Plus, Minus, Trash2, RotateCcw,
   History, CreditCard, AlertCircle, FileText, X, CheckSquare, ShieldCheck,
   ExternalLink, UserPlus, Info
 } from 'lucide-react';
@@ -12,6 +12,8 @@ import { formatHoursAndMinutes } from './ServicesList';
 import {
   getPayrollPayments,
   getPaidServices,
+  getPayrollAdjustments,
+  savePayrollAdjustments,
   isServicePaidForCleaner,
   markCleanerPayrollAsPaid,
   markCleanerPayrollAsPending,
@@ -159,20 +161,28 @@ export default function PayrollView({
   const [copiedNotification, setCopiedNotification] = useState(false);
   const [screenshotMode, setScreenshotMode] = useState(false);
 
-  // Manual Adjustments per cleaner for this period (e.g. bonus, reimbursement, deduction)
+  // Manual Adjustments per cleaner for this period (legacy fallback + persistent list of custom adjustments)
   const [manualAdjustments, setManualAdjustments] = useState({});
+  const [customAdjustmentsList, setCustomAdjustmentsList] = useState(() => getPayrollAdjustments());
+
+  // Form states for adding a new custom adjustment row (Bono / Extra + or Deducción -)
+  const [adjMode, setAdjMode] = useState('add'); // 'add' (+ Sumar) | 'subtract' (- Restar)
+  const [adjDescription, setAdjDescription] = useState('');
+  const [adjAmount, setAdjAmount] = useState('');
+  const [adjDate, setAdjDate] = useState(() => toDateStr(new Date()));
 
   // Payment Status Management (stored in localStorage)
   const [paymentsMap, setPaymentsMap] = useState(() => getPayrollPayments());
   const [paidServicesMap, setPaidServicesMap] = useState(() => getPaidServices());
 
-  // Sync payroll payments with cloud settings on mount
+  // Sync payroll payments and custom adjustments with cloud settings on mount
   useEffect(() => {
     let mounted = true;
-    syncPayrollCloud().then(({ payments, paidServices }) => {
+    syncPayrollCloud().then(({ payments, paidServices, adjustments }) => {
       if (!mounted) return;
       if (payments) setPaymentsMap(payments);
       if (paidServices) setPaidServicesMap(paidServices);
+      if (Array.isArray(adjustments)) setCustomAdjustmentsList(adjustments);
     });
     return () => { mounted = false; };
   }, []);
@@ -331,6 +341,7 @@ export default function PayrollView({
         alreadyPaidServicesList: [],
 
         manualAdjustment: Number(manualAdjustments[c]) || 0,
+        adjustmentsList: [],
         totalPay: 0, // Pending amount to transfer
         servicesList: [],
       };
@@ -373,6 +384,7 @@ export default function PayrollView({
             alreadyPaidAmount: 0,
             alreadyPaidServicesList: [],
             manualAdjustment: Number(manualAdjustments[cl]) || 0,
+            adjustmentsList: [],
             totalPay: 0,
             servicesList: [],
           };
@@ -393,7 +405,10 @@ export default function PayrollView({
           clTip = (Number(svc.tip) || 0) / (svcCleaners.length || 1);
         }
 
-        const clHours = Number(svc.horas) || 0;
+        const clHours =
+          svc.horasPorCleaner && svc.horasPorCleaner[cl] != null && Number(svc.horasPorCleaner[cl]) > 0
+            ? Number(svc.horasPorCleaner[cl])
+            : Number(svc.horas) || 0;
         const clServiceTotal = clBasePay + clTip;
 
         // Check if this specific service was already marked as paid for this cleaner in any prior payroll
@@ -457,14 +472,99 @@ export default function PayrollView({
       });
     });
 
+    // Attach custom payroll adjustments (Bonos / Extras + and Deducciones -) for each cleaner in this period
+    (customAdjustmentsList || []).forEach((adj) => {
+      if (!adj || !adj.cleaner) return;
+      const clName = Object.keys(stats).find(
+        (k) => k.toLowerCase().trim() === String(adj.cleaner).toLowerCase().trim()
+      ) || String(adj.cleaner).trim();
+
+      if (isSupervisorFer && clName.toLowerCase() !== 'maria') return;
+
+      const matchesPeriod =
+        adj.periodKey === periodKey ||
+        (adj.fecha && isDateInRange(adj.fecha));
+
+      if (!matchesPeriod) return;
+
+      if (!stats[clName]) {
+        stats[clName] = {
+          cleaner: clName,
+          totalServices: 0,
+          cancelledServices: 0,
+          totalHours: 0,
+          basePay: 0,
+          tips: 0,
+          totalPeriodEarnings: 0,
+          pendingServicesCount: 0,
+          pendingHours: 0,
+          pendingBasePay: 0,
+          pendingTips: 0,
+          pendingPay: 0,
+          pendingServicesList: [],
+          alreadyPaidServicesCount: 0,
+          alreadyPaidHours: 0,
+          alreadyPaidBasePay: 0,
+          alreadyPaidTips: 0,
+          alreadyPaidAmount: 0,
+          alreadyPaidServicesList: [],
+          manualAdjustment: Number(manualAdjustments[clName]) || 0,
+          adjustmentsList: [],
+          totalPay: 0,
+          servicesList: [],
+        };
+      }
+
+      const absAmt = Math.abs(Number(adj.amount) || 0);
+      const isSubtract = adj.mode === 'subtract' || Number(adj.signedAmount) < 0;
+      const signedVal = isSubtract ? -absAmt : absAmt;
+      const descText =
+        (adj.description || '').trim() ||
+        (isSubtract ? 'Deducción / Ajuste Negativo' : 'Bono / Ajuste Extra');
+
+      const normalizedAdj = {
+        ...adj,
+        cleaner: clName,
+        mode: isSubtract ? 'subtract' : 'add',
+        amount: absAmt,
+        signedAmount: signedVal,
+        description: descText,
+      };
+
+      stats[clName].adjustmentsList.push(normalizedAdj);
+      stats[clName].manualAdjustment = parseFloat(
+        (stats[clName].manualAdjustment + signedVal).toFixed(2)
+      );
+
+      // Push as an explicit row (renglón) in the cleaner's payroll table
+      stats[clName].servicesList.push({
+        id: adj.id,
+        isAdjustmentRow: true,
+        adjustmentRecord: normalizedAdj,
+        adjustmentMode: isSubtract ? 'subtract' : 'add',
+        adjustmentAbsAmount: absAmt,
+        fecha: adj.fecha || toDateStr(new Date()),
+        unidad: descText,
+        tipo: isSubtract ? 'Deducción (-)' : 'Bono / Extra (+)',
+        horas: 0,
+        pagoBase: signedVal,
+        tip: 0,
+        subtotal: signedVal,
+        status: 'activo',
+        isAlreadyPaid: false,
+        pagoEstado: isSubtract ? 'Deducción (-)' : 'Bono (+)',
+        coCleaners: [],
+      });
+    });
+
     Object.values(stats).forEach((cs) => {
-      cs.totalPeriodEarnings = parseFloat((cs.basePay + cs.tips + (Number(manualAdjustments[cs.cleaner]) || 0)).toFixed(2));
+      cs.totalPeriodEarnings = parseFloat((cs.basePay + cs.tips + cs.manualAdjustment).toFixed(2));
       
       const periodPayment = paymentsMap[buildPaymentKey(cs.cleaner, periodKey)];
       const isPeriodPaidDirectly = periodPayment && periodPayment.status === 'pagado';
 
-      // Pending pay sums ONLY the unpaid services + adjustment
-      const calculatedPending = parseFloat((cs.pendingBasePay + cs.pendingTips + (Number(manualAdjustments[cs.cleaner]) || 0)).toFixed(2));
+      // Pending pay sums ONLY the unpaid services + manualAdjustment (bonuses - deductions)
+      const calculatedPending = parseFloat((cs.pendingBasePay + cs.pendingTips + cs.manualAdjustment).toFixed(2));
       cs.pendingPay = Math.max(0, calculatedPending);
 
       if (isPeriodPaidDirectly) {
@@ -472,7 +572,7 @@ export default function PayrollView({
         cs.isPaid = true;
         cs.paymentStatus = 'pagado';
         cs.paymentRecord = periodPayment;
-      } else if (cs.totalServices > 0 && cs.pendingServicesCount === 0) {
+      } else if (cs.totalServices > 0 && cs.pendingServicesCount === 0 && cs.manualAdjustment === 0) {
         // Every completed service in this period was ALREADY paid in prior/overlapping payrolls (e.g. day 16 paid in 1-16)
         cs.totalPay = 0;
         cs.isPaid = true;
@@ -493,21 +593,20 @@ export default function PayrollView({
           markedBy: cs.alreadyPaidServicesList[0]?.paidRecord?.markedBy || 'Nómina Anterior',
         };
       } else {
-        // There are pending unpaid services!
-        // totalPay to transfer is strictly the pending amount (preventing day 16 from being added!)
+        // There are pending unpaid services or custom adjustments!
         cs.totalPay = cs.pendingPay;
         cs.isPaid = false;
         cs.paymentStatus = 'pendiente';
         cs.paymentRecord = null;
       }
 
-      // Sort each cleaner's services descending by date
+      // Sort each cleaner's rows descending by date (keeping adjustments visible alongside shifts)
       cs.servicesList.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
     });
 
     const list = Object.values(stats);
     return { cleanerStatsMap: stats, allCleanersList: list };
-  }, [effectiveCleaners, isSupervisorFer, servicesInPeriod, manualAdjustments, paidServicesMap, paymentsMap, periodKey, dateFilterLabel, periodTypeLabel]);
+  }, [effectiveCleaners, isSupervisorFer, servicesInPeriod, manualAdjustments, customAdjustmentsList, isDateInRange, paidServicesMap, paymentsMap, periodKey, dateFilterLabel, periodTypeLabel]);
 
   // Status metrics for all cleaners in active period
   const { totalPendientesCount, totalPendientesAmount, totalPagadosCount, totalPagadosAmount } = useMemo(() => {
@@ -713,7 +812,13 @@ export default function PayrollView({
     }
 
     if (activeCleanerData.manualAdjustment !== 0) {
-      text += `⚖️ *Ajuste / Bono:* ${activeCleanerData.manualAdjustment > 0 ? '+' : ''}$${activeCleanerData.manualAdjustment.toFixed(2)} CAD\n`;
+      text += `⚖️ *Ajustes / Bonos / Deducciones:* ${activeCleanerData.manualAdjustment > 0 ? '+' : '-'}$${Math.abs(activeCleanerData.manualAdjustment).toFixed(2)} CAD\n`;
+      if (activeCleanerData.adjustmentsList?.length > 0) {
+        activeCleanerData.adjustmentsList.forEach((adj) => {
+          const isSub = adj.mode === 'subtract';
+          text += `   • ${isSub ? '➖' : '➕'} _${adj.description}:_ ${isSub ? '-' : '+'}$${Number(adj.amount || 0).toFixed(2)} CAD\n`;
+        });
+      }
     }
     text += `💰 *TOTAL A TRANSFERIR:* $${activeCleanerData.totalPay.toFixed(2)} CAD\n`;
     if (isActiveCleanerPaid) {
@@ -725,9 +830,16 @@ export default function PayrollView({
       text += `⏳ *ESTADO:* PENDIENTE DE PAGO\n`;
     }
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    text += `*Desglose de Turnos:*\n`;
+    text += `*Desglose de Renglones (Turnos y Ajustes):*\n`;
 
     activeCleanerData.servicesList.forEach((s, idx) => {
+      if (s.isAdjustmentRow) {
+        const isSub = s.subtotal < 0;
+        const signStr = isSub ? '-' : '+';
+        const tag = isSub ? '➖ [DEDUCCIÓN]' : '➕ [BONO / EXTRA]';
+        text += `${idx + 1}. ${tag} ${s.fecha} | 📝 ${s.unidad} | 💵 ${signStr}$${Math.abs(s.subtotal).toFixed(2)} CAD\n`;
+        return;
+      }
       const durText = formatHoursAndMinutes(s.horas);
       const isCanc = s.status === 'cancelado';
       if (isCanc) {
@@ -797,6 +909,69 @@ export default function PayrollView({
       ...prev,
       [cleanerName]: num
     }));
+  };
+
+  // Add a new custom adjustment row (positive or negative) with description to the cleaner's payroll
+  const handleAddCustomAdjustment = (cleanerName, e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const rawAmt = Math.abs(parseFloat(adjAmount) || 0);
+    if (!cleanerName || rawAmt <= 0) return;
+
+    const isSub = adjMode === 'subtract';
+    const finalDescription =
+      (adjDescription || '').trim() ||
+      (isSub ? 'Deducción / Descuento de Nómina' : 'Bono / Ajuste Extra de Nómina');
+
+    const newAdj = {
+      id: `adj_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      cleaner: cleanerName,
+      periodKey,
+      fecha: adjDate || toDateStr(new Date()),
+      description: finalDescription,
+      mode: isSub ? 'subtract' : 'add',
+      amount: rawAmt,
+      signedAmount: isSub ? -rawAmt : rawAmt,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextList = [newAdj, ...(customAdjustmentsList || [])];
+    setCustomAdjustmentsList(nextList);
+    savePayrollAdjustments(nextList);
+    setAdjDescription('');
+    setAdjAmount('');
+  };
+
+  // Update an existing custom adjustment (e.g. switch between + Sumar and - Restar, or change amount / description)
+  const handleUpdateCustomAdjustment = (adjId, patch = {}) => {
+    const nextList = (customAdjustmentsList || []).map((item) => {
+      if (!item || item.id !== adjId) return item;
+      const nextMode = patch.mode != null ? patch.mode : item.mode;
+      const nextAmount =
+        patch.amount != null
+          ? Math.max(0, Math.abs(parseFloat(patch.amount) || 0))
+          : Math.abs(Number(item.amount) || 0);
+      const nextDesc =
+        patch.description != null ? patch.description : item.description;
+      const nextFecha = patch.fecha != null ? patch.fecha : item.fecha;
+
+      return {
+        ...item,
+        mode: nextMode === 'subtract' ? 'subtract' : 'add',
+        amount: nextAmount,
+        signedAmount: nextMode === 'subtract' ? -nextAmount : nextAmount,
+        description: nextDesc,
+        fecha: nextFecha,
+      };
+    });
+    setCustomAdjustmentsList(nextList);
+    savePayrollAdjustments(nextList);
+  };
+
+  // Delete a custom adjustment row from the payroll
+  const handleDeleteCustomAdjustment = (adjId) => {
+    const nextList = (customAdjustmentsList || []).filter((item) => item && item.id !== adjId);
+    setCustomAdjustmentsList(nextList);
+    savePayrollAdjustments(nextList);
   };
 
   const now = new Date();
@@ -1556,40 +1731,327 @@ export default function PayrollView({
                   </div>
                 </div>
 
-                {/* Manual Adjustment Widget */}
-                <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                  activeCleanerData.manualAdjustment !== 0
-                    ? 'bg-amber-50/80 border-amber-300'
-                    : 'bg-slate-50 border-slate-200'
+                {/* Manual Adjustment & Custom Payroll Rows Configuration Panel */}
+                <div className={`p-4 sm:p-5 rounded-2xl border space-y-4 no-print ${
+                  activeCleanerData.manualAdjustment > 0
+                    ? 'bg-emerald-50/70 border-emerald-300'
+                    : activeCleanerData.manualAdjustment < 0
+                    ? 'bg-rose-50/70 border-rose-300'
+                    : 'bg-amber-50/60 border-amber-200'
                 }`}>
-                  <div>
-                    <span className="text-xs font-bold text-amber-900 block">
-                      Ajuste Extra / Bono / Deducción ({periodTypeLabel})
-                    </span>
-                    <span className="text-[11px] text-amber-700 block">
-                      Modifica o agrega un bono especial o ajuste en CAD para la nómina de {activeCleanerData.cleaner}
-                    </span>
+                  {/* Panel Header & Net Adjustment Balance */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-amber-200/70">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs sm:text-sm font-bold text-[#0B1D4A]">
+                          Ajuste Extra / Bono / Deducción ({periodTypeLabel})
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-[#0B1D4A] text-[#FFB566] text-[10px] font-bold">
+                          Se agrega a los renglones de nómina
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-600 block mt-0.5">
+                        Agrega una descripción y configura si deseas <strong>sumar (+ bono/extra)</strong> o <strong>restar (- deducción)</strong> X cantidad en la nómina de <strong>{activeCleanerData.cleaner}</strong>.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                      <span className="text-[11px] text-slate-500 font-semibold">Balance de Ajustes:</span>
+                      <span className={`px-3 py-1 rounded-xl text-xs font-extrabold tabular-nums border ${
+                        activeCleanerData.manualAdjustment > 0
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : activeCleanerData.manualAdjustment < 0
+                          ? 'bg-rose-100 text-rose-900 border-rose-300'
+                          : 'bg-white text-slate-700 border-slate-200'
+                      }`}>
+                        {activeCleanerData.manualAdjustment > 0 ? '+' : activeCleanerData.manualAdjustment < 0 ? '-' : ''}
+                        ${Math.abs(activeCleanerData.manualAdjustment).toFixed(2)} CAD
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-amber-900">$</span>
-                    <input
-                      type="number"
-                      step="1"
-                      placeholder="0.00"
-                      value={manualAdjustments[activeCleanerData.cleaner] || ''}
-                      onChange={(e) => handleManualAdjustmentChange(activeCleanerData.cleaner, e.target.value)}
-                      className="w-28 px-3 py-1.5 text-xs bg-white border border-amber-300 rounded-xl font-bold text-amber-900 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] tabular-nums"
-                    />
-                    <span className="text-[11px] text-amber-800 font-bold">CAD</span>
-                  </div>
+                  {/* Form to Add a New Adjustment Row (Positivo o Negativo) */}
+                  <form
+                    onSubmit={(e) => handleAddCustomAdjustment(activeCleanerData.cleaner, e)}
+                    className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3"
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+                      
+                      {/* 1. Toggle: Sumar (+) vs Restar (-) */}
+                      <div className="shrink-0">
+                        <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">
+                          1. Operación (Sumar o Restar)
+                        </label>
+                        <div className="inline-flex rounded-xl p-1 bg-slate-100 border border-slate-200 w-full sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => setAdjMode('add')}
+                            className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              adjMode === 'add'
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-emerald-700'
+                            }`}
+                          >
+                            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Sumar (+ Bono / Extra)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAdjMode('subtract')}
+                            className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              adjMode === 'subtract'
+                                ? 'bg-rose-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-rose-700'
+                            }`}
+                          >
+                            <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Restar (- Deducción)</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. Descripción del Ajuste */}
+                      <div className="flex-1 min-w-[200px]">
+                        <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">
+                          2. Descripción / Concepto para el Renglón de Nómina
+                        </label>
+                        <input
+                          type="text"
+                          placeholder={
+                            adjMode === 'add'
+                              ? 'Ej. Bono de puntualidad, Reembolso suministros, Extra limpieza...'
+                              : 'Ej. Deducción por adelanto, Descuento insumos, Ajuste de horas...'
+                          }
+                          value={adjDescription}
+                          onChange={(e) => setAdjDescription(e.target.value)}
+                          className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] focus:bg-white"
+                        />
+                      </div>
+
+                      {/* 3. Cantidad (X Cantidad en CAD) */}
+                      <div className="w-full sm:w-40 shrink-0">
+                        <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">
+                          3. Cantidad ({adjMode === 'add' ? '+ Sumar' : '- Restar'})
+                        </label>
+                        <div className="relative flex items-center">
+                          <span className={`absolute left-3 text-xs font-extrabold ${
+                            adjMode === 'add' ? 'text-emerald-700' : 'text-rose-700'
+                          }`}>
+                            {adjMode === 'add' ? '+$' : '-$'}
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0.00"
+                            value={adjAmount}
+                            onChange={(e) => setAdjAmount(e.target.value)}
+                            className={`w-full pl-8 pr-10 py-2 text-xs bg-white border rounded-xl font-bold tabular-nums focus:outline-none focus:ring-2 ${
+                              adjMode === 'add'
+                                ? 'border-emerald-300 text-emerald-900 focus:ring-emerald-600'
+                                : 'border-rose-300 text-rose-900 focus:ring-rose-600'
+                            }`}
+                          />
+                          <span className="absolute right-2.5 text-[10px] font-bold text-slate-400">
+                            CAD
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 4. Fecha del Renglón */}
+                      <div className="w-full sm:w-36 shrink-0">
+                        <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">
+                          Fecha
+                        </label>
+                        <input
+                          type="date"
+                          value={adjDate}
+                          onChange={(e) => setAdjDate(e.target.value)}
+                          className="w-full px-2.5 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
+                        />
+                      </div>
+
+                      {/* 5. Submit Button */}
+                      <button
+                        type="submit"
+                        disabled={!adjAmount || parseFloat(adjAmount) <= 0}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                          adjMode === 'add'
+                            ? 'bg-emerald-600 hover:bg-emerald-700'
+                            : 'bg-rose-600 hover:bg-rose-700'
+                        }`}
+                      >
+                        {adjMode === 'add' ? <Plus className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+                        <span>Agregar a Renglones</span>
+                      </button>
+                    </div>
+
+                    {/* Quick Amount Preset Buttons */}
+                    <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-100">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">
+                          Cantidad rápida ({adjMode === 'add' ? 'Sumar' : 'Restar'}):
+                        </span>
+                        {[5, 10, 15, 20, 25, 30, 50, 100].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setAdjAmount(String(preset))}
+                            className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-colors ${
+                              Number(adjAmount) === preset
+                                ? adjMode === 'add'
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-rose-600 text-white border-rose-600'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {adjMode === 'add' ? '+' : '-'}${preset}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-[10px] text-slate-400">
+                        * El renglón aparecerá de inmediato en la tabla de desglose inferior y en el PDF/WhatsApp.
+                      </span>
+                    </div>
+                  </form>
+
+                  {/* Configured Adjustments List (Live Adjust Sumar / Restar & X Cantidad) */}
+                  {activeCleanerData.adjustmentsList && activeCleanerData.adjustmentsList.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#0B1D4A]">
+                          Configuración de Ajustes Activos ({activeCleanerData.adjustmentsList.length}) — Ajustar si Suma o Resta X Cantidad:
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {activeCleanerData.adjustmentsList.map((adjItem) => {
+                          const isSub = adjItem.mode === 'subtract';
+                          return (
+                            <div
+                              key={adjItem.id}
+                              className={`p-3 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-2.5 transition-all ${
+                                isSub
+                                  ? 'bg-white border-rose-200 shadow-2xs'
+                                  : 'bg-white border-emerald-200 shadow-2xs'
+                              }`}
+                            >
+                              {/* Left: Mode Switcher (+ Sumar vs - Restar) & Editable Description */}
+                              <div className="flex items-center gap-2 flex-1 flex-wrap sm:flex-nowrap">
+                                <div className="inline-flex rounded-lg p-0.5 bg-slate-100 border border-slate-200 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateCustomAdjustment(adjItem.id, { mode: 'add' })}
+                                    className={`px-2 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 transition-all ${
+                                      !isSub
+                                        ? 'bg-emerald-600 text-white shadow-2xs'
+                                        : 'text-slate-500 hover:text-emerald-700'
+                                    }`}
+                                    title="Cambiar a Sumar (+ Positivo)"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>Sumo</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateCustomAdjustment(adjItem.id, { mode: 'subtract' })}
+                                    className={`px-2 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 transition-all ${
+                                      isSub
+                                        ? 'bg-rose-600 text-white shadow-2xs'
+                                        : 'text-slate-500 hover:text-rose-700'
+                                    }`}
+                                    title="Cambiar a Restar (- Negativo)"
+                                  >
+                                    <Minus className="w-3 h-3" />
+                                    <span>Resto</span>
+                                  </button>
+                                </div>
+
+                                <input
+                                  type="text"
+                                  value={adjItem.description}
+                                  onChange={(e) =>
+                                    handleUpdateCustomAdjustment(adjItem.id, { description: e.target.value })
+                                  }
+                                  placeholder="Descripción del ajuste..."
+                                  className="flex-1 min-w-[160px] px-2.5 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] focus:bg-white"
+                                />
+                              </div>
+
+                              {/* Right: Stepper & Amount Input (X Cantidad) + Delete */}
+                              <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateCustomAdjustment(adjItem.id, {
+                                      amount: Math.max(0, (Number(adjItem.amount) || 0) - 5),
+                                    })
+                                  }
+                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition-colors"
+                                  title="Disminuir cantidad en $5"
+                                >
+                                  -$5
+                                </button>
+
+                                <div className="relative flex items-center w-28">
+                                  <span
+                                    className={`absolute left-2.5 text-xs font-extrabold ${
+                                      isSub ? 'text-rose-700' : 'text-emerald-700'
+                                    }`}
+                                  >
+                                    {isSub ? '-$' : '+$'}
+                                  </span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={adjItem.amount}
+                                    onChange={(e) =>
+                                      handleUpdateCustomAdjustment(adjItem.id, { amount: e.target.value })
+                                    }
+                                    className={`w-full pl-7 pr-2 py-1.5 text-xs font-extrabold tabular-nums border rounded-lg focus:outline-none focus:ring-2 ${
+                                      isSub
+                                        ? 'border-rose-300 text-rose-900 bg-rose-50/40 focus:ring-rose-600'
+                                        : 'border-emerald-300 text-emerald-900 bg-emerald-50/40 focus:ring-emerald-600'
+                                    }`}
+                                  />
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateCustomAdjustment(adjItem.id, {
+                                      amount: (Number(adjItem.amount) || 0) + 5,
+                                    })
+                                  }
+                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition-colors"
+                                  title="Aumentar cantidad en $5"
+                                >
+                                  +$5
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCustomAdjustment(adjItem.id)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                  title="Eliminar este renglón de ajuste"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Individual Breakdown Table with Direct Action Buttons */}
+                {/* Individual Breakdown Table with Direct Action Buttons (Turnos + Renglones de Ajuste) */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
                     <h5 className="font-serif text-sm font-bold text-[#0B1D4A]">
-                      Desglose Detallado de Turnos Realizados ({activeCleanerData.servicesList.length})
+                      Desglose Detallado de Renglones de Nómina ({activeCleanerData.servicesList.length})
                     </h5>
                     <span className="text-xs text-slate-400 font-medium">
                       {dateFilterLabel}
@@ -1602,18 +2064,119 @@ export default function PayrollView({
                         <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
                           <tr>
                             <th className="px-4 py-3">Fecha</th>
-                            <th className="px-4 py-3">Unidad / Residencia</th>
+                            <th className="px-4 py-3">Unidad / Descripción de Renglón</th>
                             <th className="px-4 py-3">Tipo</th>
                             <th className="px-4 py-3 text-center">Duración</th>
-                            <th className="px-4 py-3 text-right">Pago Base</th>
+                            <th className="px-4 py-3 text-right">Pago Base / Ajuste</th>
                             <th className="px-4 py-3 text-right">Propina</th>
                             <th className="px-4 py-3 text-right font-bold text-[#0B1D4A]">Subtotal</th>
                             <th className="px-4 py-3 text-center">Estado</th>
-                            {onEditService && <th className="px-4 py-3 text-center no-print">Acciones</th>}
+                            <th className="px-4 py-3 text-center no-print">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {activeCleanerData.servicesList.map((svc) => {
+                            // Custom Adjustment Row (Bono + or Deducción -)
+                            if (svc.isAdjustmentRow) {
+                              const isNegative = svc.subtotal < 0;
+                              const absVal = Math.abs(svc.subtotal).toFixed(2);
+                              const signChar = isNegative ? '-' : '+';
+                              return (
+                                <tr
+                                  key={svc.id}
+                                  className={`transition-colors ${
+                                    isNegative
+                                      ? 'bg-rose-50/70 hover:bg-rose-100/60 text-rose-950'
+                                      : 'bg-emerald-50/70 hover:bg-emerald-100/60 text-emerald-950'
+                                  }`}
+                                >
+                                  <td className="px-4 py-3 font-semibold whitespace-nowrap">
+                                    <div className="flex items-center gap-1.5">
+                                      {isNegative ? (
+                                        <Minus className="w-3.5 h-3.5 text-rose-600 shrink-0 stroke-[2.5]" />
+                                      ) : (
+                                        <Gift className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                      )}
+                                      <span>{svc.fecha}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 font-bold whitespace-nowrap">
+                                    <div className="flex flex-col">
+                                      <span className="text-slate-900 font-bold">{svc.unidad}</span>
+                                      <span className={`text-[10px] font-semibold ${
+                                        isNegative ? 'text-rose-700' : 'text-emerald-700'
+                                      }`}>
+                                        Renglón de Ajuste Personalizado ({isNegative ? 'Resta a la nómina' : 'Suma a la nómina'})
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 whitespace-nowrap">
+                                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                                      isNegative
+                                        ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                        : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                    }`}>
+                                      {isNegative ? '➖ Deducción (-)' : '➕ Bono / Extra (+)'}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-slate-400 font-medium whitespace-nowrap">
+                                    Ajuste
+                                  </td>
+                                  <td className={`px-4 py-3 text-right font-bold tabular-nums whitespace-nowrap ${
+                                    isNegative ? 'text-rose-700' : 'text-emerald-700'
+                                  }`}>
+                                    {signChar}${absVal}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-slate-400 whitespace-nowrap">
+                                    —
+                                  </td>
+                                  <td className={`px-4 py-3 text-right font-extrabold tabular-nums whitespace-nowrap ${
+                                    isNegative ? 'text-rose-700' : 'text-emerald-700'
+                                  }`}>
+                                    {signChar}${absVal} CAD
+                                  </td>
+                                  <td className="px-4 py-3 text-center whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUpdateCustomAdjustment(svc.id, {
+                                          mode: isNegative ? 'add' : 'subtract',
+                                        })
+                                      }
+                                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
+                                        isNegative
+                                          ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border-rose-300'
+                                          : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border-emerald-300'
+                                      }`}
+                                      title="Haz clic para cambiar entre Sumar (+) y Restar (-)"
+                                    >
+                                      {isNegative ? (
+                                        <>
+                                          <Minus className="w-3 h-3" />
+                                          <span>Restando (Cambiar a +)</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Plus className="w-3 h-3" />
+                                          <span>Sumando (Cambiar a -)</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </td>
+                                  <td className="px-4 py-3 text-center no-print whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteCustomAdjustment(svc.id)}
+                                      className="p-1 hover:bg-rose-100 text-slate-500 hover:text-rose-700 rounded-lg transition-colors"
+                                      title="Eliminar este renglón de ajuste de la nómina"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            }
+
                             const isCancelled = svc.status === 'cancelado';
                             const isPaidPrev = svc.isAlreadyPaid;
                             return (
@@ -1689,8 +2252,8 @@ export default function PayrollView({
                                     </span>
                                   )}
                                 </td>
-                                {onEditService && (
-                                  <td className="px-4 py-3 text-center no-print whitespace-nowrap">
+                                <td className="px-4 py-3 text-center no-print whitespace-nowrap">
+                                  {onEditService ? (
                                     <button
                                       type="button"
                                       onClick={() => onEditService(svc.rawService)}
@@ -1699,14 +2262,37 @@ export default function PayrollView({
                                     >
                                       <Edit2 className="w-3.5 h-3.5" />
                                     </button>
-                                  </td>
-                                )}
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )}
+                                </td>
                               </tr>
                             );
                           })}
                         </tbody>
                         {activeCleanerData.servicesList.length > 0 && (
                           <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-300">
+                            {activeCleanerData.manualAdjustment !== 0 && (
+                              <tr className={`text-[11px] border-b ${
+                                activeCleanerData.manualAdjustment > 0
+                                  ? 'bg-emerald-50/70 text-emerald-950 border-emerald-200'
+                                  : 'bg-rose-50/70 text-rose-950 border-rose-200'
+                              }`}>
+                                <td colSpan={4} className="px-4 py-2 font-bold">
+                                  ⚖️ Total Ajustes Personalizados ({activeCleanerData.adjustmentsList?.length || 1} renglón{activeCleanerData.adjustmentsList?.length === 1 ? '' : 'es'}):
+                                </td>
+                                <td className="px-4 py-2 text-right tabular-nums font-bold">
+                                  {activeCleanerData.manualAdjustment > 0 ? '+' : '-'}${Math.abs(activeCleanerData.manualAdjustment).toFixed(2)}
+                                </td>
+                                <td className="px-4 py-2 text-right">—</td>
+                                <td className={`px-4 py-2 text-right tabular-nums font-extrabold ${
+                                  activeCleanerData.manualAdjustment > 0 ? 'text-emerald-800' : 'text-rose-800'
+                                }`}>
+                                  {activeCleanerData.manualAdjustment > 0 ? '+' : '-'}${Math.abs(activeCleanerData.manualAdjustment).toFixed(2)} CAD
+                                </td>
+                                <td colSpan={2}></td>
+                              </tr>
+                            )}
                             {activeCleanerData.alreadyPaidServicesCount > 0 && !isActiveCleanerPaid && (
                               <tr className="bg-emerald-50/60 text-emerald-950 text-[11px] border-b border-emerald-200">
                                 <td colSpan={3} className="px-4 py-2 font-semibold">
@@ -1724,7 +2310,7 @@ export default function PayrollView({
                                 <td className="px-4 py-2 text-right tabular-nums font-bold text-emerald-800">
                                   -${activeCleanerData.alreadyPaidAmount.toFixed(2)} CAD
                                 </td>
-                                <td colSpan={onEditService ? 2 : 1}></td>
+                                <td colSpan={2}></td>
                               </tr>
                             )}
                             <tr>
@@ -1744,7 +2330,7 @@ export default function PayrollView({
                                 ${activeCleanerData.totalPay.toFixed(2)} CAD
                               </td>
                               <td></td>
-                              {onEditService && <td className="no-print"></td>}
+                              <td className="no-print"></td>
                             </tr>
                           </tfoot>
                         )}
@@ -1934,6 +2520,13 @@ export default function PayrollView({
                             </td>
                             <td className="px-5 py-3.5 text-right font-bold text-[#0B1D4A] tabular-nums text-sm font-serif">
                               ${row.totalPay.toFixed(2)} CAD
+                              {row.manualAdjustment !== 0 && (
+                                <span className={`block text-[10px] font-sans font-bold ${
+                                  row.manualAdjustment > 0 ? 'text-emerald-700' : 'text-rose-700'
+                                }`}>
+                                  ({row.manualAdjustment > 0 ? '+' : '-'}${Math.abs(row.manualAdjustment).toFixed(2)} en ajustes)
+                                </span>
+                              )}
                               {row.alreadyPaidServicesCount > 0 && !row.isPaid && (
                                 <span className="block text-[10px] font-sans font-normal text-emerald-700">
                                   (excluye ${row.alreadyPaidAmount.toFixed(2)} ya pagado)

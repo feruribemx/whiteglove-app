@@ -4,6 +4,7 @@
 
 const PAYMENTS_STORAGE_KEY = 'wg_payroll_payments';
 const PAID_SERVICES_STORAGE_KEY = 'wg_payroll_paid_services';
+const ADJUSTMENTS_STORAGE_KEY = 'wg_payroll_adjustments';
 
 /**
  * Format date for display in payroll receipts
@@ -51,6 +52,37 @@ export function savePayrollPayments(records) {
 }
 
 /**
+ * Read all custom payroll adjustments from localStorage
+ * Stored as an array of adjustment objects:
+ * [{ id, cleaner, periodKey, fecha, description, mode: 'add' | 'subtract', amount: number }]
+ */
+export function getPayrollAdjustments() {
+  try {
+    const raw = localStorage.getItem(ADJUSTMENTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error('Error reading payroll adjustments:', err);
+    return [];
+  }
+}
+
+/**
+ * Save custom payroll adjustments to localStorage and cloud
+ */
+export function savePayrollAdjustments(adjustmentsList) {
+  try {
+    const safeList = Array.isArray(adjustmentsList) ? adjustmentsList : [];
+    localStorage.setItem(ADJUSTMENTS_STORAGE_KEY, JSON.stringify(safeList));
+    savePayrollSetting('payroll_adjustments', { items: safeList }).catch(() => {});
+    saveSettingToFirestore('payroll_adjustments', { items: safeList }).catch(() => {});
+  } catch (err) {
+    console.error('Error saving payroll adjustments:', err);
+  }
+}
+
+/**
  * Read all individually paid service records from localStorage
  */
 export function getPaidServices() {
@@ -77,27 +109,55 @@ export function savePaidServices(records) {
 }
 
 /**
- * Sync payroll payments and paid services with cloud
+ * Sync payroll payments, paid services, and custom adjustments with cloud
  */
 export async function syncPayrollCloud() {
   try {
-    const [cloudPayments, cloudPaidServices] = await Promise.all([
+    const [cloudPayments, cloudPaidServices, cloudAdjustments] = await Promise.all([
       fetchPayrollSetting('payroll_payments'),
       fetchPayrollSetting('payroll_paid_services'),
+      fetchPayrollSetting('payroll_adjustments'),
     ]);
 
     const localPayments = getPayrollPayments();
     const localPaidServices = getPaidServices();
+    const localAdjustments = getPayrollAdjustments();
 
     const mergedPayments = { ...(cloudPayments || {}), ...localPayments };
     const mergedPaidServices = { ...(cloudPaidServices || {}), ...localPaidServices };
 
+    let mergedAdjustments = localAdjustments;
+    const cloudAdjList = Array.isArray(cloudAdjustments?.items)
+      ? cloudAdjustments.items
+      : Array.isArray(cloudAdjustments)
+      ? cloudAdjustments
+      : [];
+    if (cloudAdjList.length > 0) {
+      const byId = new Map();
+      cloudAdjList.forEach((item) => {
+        if (item && item.id) byId.set(item.id, item);
+      });
+      localAdjustments.forEach((item) => {
+        if (item && item.id) byId.set(item.id, item);
+      });
+      mergedAdjustments = Array.from(byId.values());
+    }
+
     localStorage.setItem(PAYMENTS_STORAGE_KEY, JSON.stringify(mergedPayments));
     localStorage.setItem(PAID_SERVICES_STORAGE_KEY, JSON.stringify(mergedPaidServices));
+    localStorage.setItem(ADJUSTMENTS_STORAGE_KEY, JSON.stringify(mergedAdjustments));
 
-    return { payments: mergedPayments, paidServices: mergedPaidServices };
+    return {
+      payments: mergedPayments,
+      paidServices: mergedPaidServices,
+      adjustments: mergedAdjustments,
+    };
   } catch (err) {
-    return { payments: getPayrollPayments(), paidServices: getPaidServices() };
+    return {
+      payments: getPayrollPayments(),
+      paidServices: getPaidServices(),
+      adjustments: getPayrollAdjustments(),
+    };
   }
 }
 

@@ -58,6 +58,13 @@ export const svcFromDb = (r) => {
   const isCancelled = capt.startsWith('[CANCELADO]') || r.tipo === 'Cancelado' || (r.tipo || '').includes('(Cancelado)');
   const cleanCapt = capt.replace(/^\[CANCELADO\]\s*/, '').trim();
 
+  const rawRates = r.rates_por_cleaner ? { ...r.rates_por_cleaner } : null;
+  let horasPorCleaner = r.horasPorCleaner || r.horas_por_cleaner || null;
+  if (rawRates && rawRates.__horasPorCleaner) {
+    if (!horasPorCleaner) horasPorCleaner = rawRates.__horasPorCleaner;
+    delete rawRates.__horasPorCleaner;
+  }
+
   return {
     id: Number(r.id),
     fecha: r.fecha,
@@ -65,11 +72,12 @@ export const svcFromDb = (r) => {
     cleaners: r.cleaners || [],
     cleaner: (r.cleaners || [])[0] || '',
     horas: Number(r.horas),
+    horasPorCleaner: horasPorCleaner || null,
     tipo: isCancelled && r.tipo === 'Cancelado' ? 'Limpieza' : (r.tipo || 'Limpieza'),
     cobro: r.cobro !== null && r.cobro !== undefined ? Number(r.cobro) : null,
     pagoCleaner: r.pago_cleaner !== null && r.pago_cleaner !== undefined ? Number(r.pago_cleaner) : null,
     pagosPorCleaner: r.pagos_por_cleaner || null,
-    ratesPorCleaner: r.rates_por_cleaner || null,
+    ratesPorCleaner: rawRates && Object.keys(rawRates).length ? rawRates : null,
     pagoCleaningTeam: r.pago_cleaning_team !== null && r.pago_cleaning_team !== undefined ? Number(r.pago_cleaning_team) : null,
     tip: r.tip !== null && r.tip !== undefined ? Number(r.tip) : null,
     capturista: cleanCapt,
@@ -83,6 +91,14 @@ export const svcToDb = (s) => {
     capt = `[CANCELADO] ${capt}`.trim();
   }
 
+  const combinedRates =
+    s.ratesPorCleaner || s.horasPorCleaner
+      ? {
+          ...(s.ratesPorCleaner || {}),
+          ...(s.horasPorCleaner ? { __horasPorCleaner: s.horasPorCleaner } : {}),
+        }
+      : null;
+
   return {
     id: s.id,
     fecha: s.fecha,
@@ -93,7 +109,7 @@ export const svcToDb = (s) => {
     cobro: s.cobro != null ? Number(s.cobro) : null,
     pago_cleaner: s.pagoCleaner != null ? Number(s.pagoCleaner) : null,
     pagos_por_cleaner: s.pagosPorCleaner || null,
-    rates_por_cleaner: s.ratesPorCleaner || null,
+    rates_por_cleaner: combinedRates,
     pago_cleaning_team: s.pagoCleaningTeam != null ? Number(s.pagoCleaningTeam) : null,
     tip: s.tip != null ? Number(s.tip) : null,
     capturista: capt || null,
