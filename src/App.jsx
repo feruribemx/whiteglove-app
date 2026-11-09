@@ -777,15 +777,21 @@ export default function App() {
   if (previewLanding) {
     return (
       <div className="relative">
-        <div className="fixed top-20 right-6 z-50">
+        <div className="fixed top-20 right-6 z-50 flex items-center gap-2">
+          <a
+            href="#reviews"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-[#0B1D4A] text-[#FFB566] border border-[#FFB566]/40 font-bold text-xs rounded-xl shadow-xl hover:brightness-110 transition-all"
+          >
+            ★ Gestionar Reviews
+          </a>
           <button
             onClick={() => setPreviewLanding(false)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-xl hover:brightness-105 active:scale-[0.98] transition-all"
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl shadow-xl hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer"
           >
             ← Volver al Panel
           </button>
         </div>
-        <LandingView onGoToLogin={() => setPreviewLanding(false)} />
+        <LandingView currentUser={currentUser} onGoToLogin={() => setPreviewLanding(false)} />
       </div>
     );
   }

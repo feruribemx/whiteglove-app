@@ -648,7 +648,7 @@ export default function ServicesList({
                 <th className="px-4 py-3">Capturista</th>
                 <th className="px-4 py-3">Tipo</th>
                 <th className="px-4 py-3 text-center">Estado</th>
-                {canEdit && <th className="px-4 py-3 text-center w-14">Acciones</th>}
+                <th className="px-4 py-3 text-center w-14">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -695,31 +695,9 @@ export default function ServicesList({
 
                     {/* Unidad */}
                     <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-1.5">
                         <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <span className={isCancelled ? 'line-through text-slate-400' : ''}>{svc.unidad}</span>
-                        {onOpenClientDossier && svc.unidad && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenClientDossier(svc.unidad);
-                            }}
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-[#0B1D4A] border border-amber-300/80 transition-colors cursor-pointer"
-                            title={`Ver Ficha Técnica de ${svc.unidad} (dirección, acceso, Wi-Fi, notas)`}
-                          >
-                            <span>📋 Ficha</span>
-                          </button>
-                        )}
-                        {clientServiceCounts[svc.unidad?.trim()] > 1 && !isCancelled && (
-                          <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-800 border border-sky-200 shadow-2xs"
-                            title={`Cliente recurrente: ${clientServiceCounts[svc.unidad?.trim()]} servicios registrados`}
-                          >
-                            <Copy className="w-2.5 h-2.5 text-sky-600" />
-                            <span>Recurrente</span>
-                          </span>
-                        )}
                       </div>
                     </td>
 
@@ -906,11 +884,11 @@ export default function ServicesList({
                       </span>
                     </td>
 
-                    {/* Acciones de Administrador (Botones directos Editar / Eliminar + Menú ⋮) */}
-                    {canEdit && (
-                      <td className="px-3 py-3 text-center whitespace-nowrap relative action-menu-cell">
-                        <div className="inline-flex items-center justify-center gap-1">
-                          {/* Botón directo Editar */}
+                    {/* Acciones (Botones directos Editar / Eliminar + Menú ⋮ con Ficha Técnica y Recurrente) */}
+                    <td className="px-3 py-3 text-center whitespace-nowrap relative action-menu-cell">
+                      <div className="inline-flex items-center justify-center gap-1">
+                        {/* Botón directo Editar (Solo Admins) */}
+                        {canEdit && (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -922,56 +900,93 @@ export default function ServicesList({
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
+                        )}
 
-                          {/* Botón directo Eliminar (Solo Administradores con permiso) */}
-                          {onDeleteService && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteService(svc.id);
-                              }}
-                              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
-                              title="Eliminar servicio"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {/* Menú de 3 puntos (Más opciones: Duplicar, Cancelar) */}
+                        {/* Botón directo Eliminar (Solo Administradores con permiso) */}
+                        {canEdit && onDeleteService && (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setOpenMenuId((prev) => (prev === svc.id ? null : svc.id));
+                              onDeleteService(svc.id);
                             }}
-                            className={`p-1.5 rounded-xl transition-all cursor-pointer ${
-                              openMenuId === svc.id
-                                ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs'
-                                : 'text-slate-500 hover:text-[#0B1D4A] hover:bg-slate-100'
-                            }`}
-                            title="Más opciones"
-                            aria-label="Más opciones"
+                            className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="Eliminar servicio"
                           >
-                            <MoreVertical className="w-4 h-4" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        </div>
+                        )}
 
-                        {/* Dropdown Menu */}
-                        {openMenuId === svc.id && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className={`absolute right-3 w-48 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-left animate-in fade-in zoom-in-95 duration-100 ${
-                              index >= filteredServices.length - 2 && filteredServices.length > 2
-                                ? 'bottom-full mb-1'
-                                : 'top-full mt-1'
-                            }`}
-                          >
-                            <div className="px-3 py-1 border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                              Acciones Admin
-                            </div>
+                        {/* Menú de 3 puntos (Más opciones: Ficha Técnica, Recurrente, Duplicar, Cancelar) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId((prev) => (prev === svc.id ? null : svc.id));
+                          }}
+                          className={`p-1.5 rounded-xl transition-all cursor-pointer ${
+                            openMenuId === svc.id
+                              ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs'
+                              : 'text-slate-500 hover:text-[#0B1D4A] hover:bg-slate-100'
+                          }`}
+                          title="Opciones del cliente y servicio (Ficha Técnica, Recurrente y más)"
+                          aria-label="Más opciones"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                      </div>
 
-                            {/* 1. Editar */}
+                      {/* Dropdown Menu */}
+                      {openMenuId === svc.id && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className={`absolute right-3 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-left animate-in fade-in zoom-in-95 duration-100 ${
+                            index >= filteredServices.length - 2 && filteredServices.length > 2
+                              ? 'bottom-full mb-1'
+                              : 'top-full mt-1'
+                          }`}
+                        >
+                          <div className="px-3 py-1.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
+                              {svc.unidad || 'Opciones'}
+                            </span>
+                            {clientServiceCounts[svc.unidad?.trim()] > 1 && !isCancelled ? (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-800 border border-sky-200 shrink-0"
+                                title={`Cliente recurrente: ${clientServiceCounts[svc.unidad?.trim()]} servicios registrados`}
+                              >
+                                <Copy className="w-2.5 h-2.5 text-sky-600" />
+                                <span>Recurrente ({clientServiceCounts[svc.unidad?.trim()]})</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 font-semibold shrink-0">
+                                1er Servicio
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Ficha Técnica del Cliente */}
+                          {onOpenClientDossier && svc.unidad && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                onOpenClientDossier(svc.unidad);
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-[#0B1D4A] hover:bg-amber-50 transition-colors cursor-pointer text-left border-b border-slate-100"
+                            >
+                              <span className="text-sm leading-none">📋</span>
+                              <div>
+                                <span className="block">Ver Ficha Técnica</span>
+                                <span className="text-[10px] font-normal text-slate-500 block">
+                                  Dirección, código Lockbox y Wi-Fi
+                                </span>
+                              </div>
+                            </button>
+                          )}
+
+                          {/* 1. Editar */}
+                          {canEdit && (
                             <button
                               type="button"
                               onClick={() => {
@@ -983,37 +998,39 @@ export default function ServicesList({
                               <Edit2 className="w-3.5 h-3.5 text-slate-500" />
                               <span>Editar servicio</span>
                             </button>
+                          )}
 
-                            {/* 2. Duplicar */}
-                            {onOpenNewService && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  onOpenNewService({
-                                    unidad: svc.unidad,
-                                    horas: svc.horas,
-                                    horasPorCleaner: svc.horasPorCleaner,
-                                    cleaner: svc.cleaner,
-                                    cleaners: svc.cleaners,
-                                    tipo: svc.tipo,
-                                    cobro: svc.cobro,
-                                    pagoCleaningTeam: svc.pagoCleaningTeam,
-                                    pagosPorCleaner: svc.pagosPorCleaner,
-                                    ratesPorCleaner: svc.ratesPorCleaner,
-                                    fecha: new Date().toISOString().split('T')[0],
-                                    capturista: currentUser?.displayName || currentUser?.username || 'WhiteGlove',
-                                    isDuplicate: true,
-                                  });
-                                }}
-                                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-sky-800 hover:text-sky-950 hover:bg-sky-50 transition-colors cursor-pointer text-left"
-                              >
-                                <Copy className="w-3.5 h-3.5 text-sky-600" />
-                                <span>Duplicar servicio</span>
-                              </button>
-                            )}
+                          {/* 2. Duplicar */}
+                          {canEdit && onOpenNewService && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                onOpenNewService({
+                                  unidad: svc.unidad,
+                                  horas: svc.horas,
+                                  horasPorCleaner: svc.horasPorCleaner,
+                                  cleaner: svc.cleaner,
+                                  cleaners: svc.cleaners,
+                                  tipo: svc.tipo,
+                                  cobro: svc.cobro,
+                                  pagoCleaningTeam: svc.pagoCleaningTeam,
+                                  pagosPorCleaner: svc.pagosPorCleaner,
+                                  ratesPorCleaner: svc.ratesPorCleaner,
+                                  fecha: new Date().toISOString().split('T')[0],
+                                  capturista: currentUser?.displayName || currentUser?.username || 'WhiteGlove',
+                                  isDuplicate: true,
+                                });
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-sky-800 hover:text-sky-950 hover:bg-sky-50 transition-colors cursor-pointer text-left"
+                            >
+                              <Copy className="w-3.5 h-3.5 text-sky-600" />
+                              <span>Duplicar servicio</span>
+                            </button>
+                          )}
 
-                            {/* 3. Cancelar / Reactivar */}
+                          {/* 3. Cancelar / Reactivar */}
+                          {canEdit && (
                             <button
                               type="button"
                               onClick={() => {
@@ -1040,28 +1057,28 @@ export default function ServicesList({
                                 </>
                               )}
                             </button>
+                          )}
 
-                            {/* 4. Eliminar (solo si tiene permiso) */}
-                            {onDeleteService && (
-                              <>
-                                <div className="my-1 border-t border-slate-100" />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    onDeleteService(svc.id);
-                                  }}
-                                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer text-left"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                  <span>Eliminar servicio</span>
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    )}
+                          {/* 4. Eliminar (solo si tiene permiso) */}
+                          {canEdit && onDeleteService && (
+                            <>
+                              <div className="my-1 border-t border-slate-100" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  onDeleteService(svc.id);
+                                }}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer text-left"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                <span>Eliminar servicio</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}

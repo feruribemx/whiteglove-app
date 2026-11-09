@@ -1,13 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Shield, Clock, CheckCircle2, MessageCircle, ArrowRight,
   Star, Globe, Instagram, Building2, Home, RefreshCw, Layers,
   ShoppingBag, MapPin, ChevronRight, BadgeCheck, Check, Phone,
-  Eye, X, Mail, Send, Calendar, AlertCircle, Loader2, FileText
+  Eye, X, Mail, Send, Calendar, AlertCircle, Loader2, FileText,
+  Edit3, Trash2, Plus
 } from 'lucide-react';
 import { saveInquiryToFirestore } from '../lib/firebase';
+import {
+  getSavedReviews,
+  saveReviewsToCloud,
+  subscribeReviewsFromCloud,
+  formatReviewTimeAgo,
+  ADMIN_TIME_PRESETS,
+} from '../lib/reviews';
+import { hasFullAccess } from '../lib/auth';
 
-export default function LandingView({ onGoToLogin }) {
+export default function LandingView({ onGoToLogin, currentUser }) {
   // Default language is English; when toggled to Spanish, 100% of the page switches to Spanish
   const [lang, setLang] = useState('en');
 
@@ -272,21 +281,21 @@ export default function LandingView({ onGoToLogin }) {
       colStandard: 'Service Standard',
       colWhiteGlove: 'WhiteGlove Standard',
       colOther: 'Standard Cleaners',
-      compRow1Feat: 'Inspection & Verification',
-      compRow1Wg: '50-Point Digital Checklist + Photo Sign-off',
-      compRow1Other: 'Unverified / No documentation',
-      compRow2Feat: 'Chemicals & Materials',
-      compRow2Wg: 'Stone-safe, eco-friendly, zero synthetic fumes',
-      compRow2Other: 'Harsh abrasive bleach and generic store chemicals',
-      compRow3Feat: 'Short-Term Rental Linen Care',
-      compRow3Wg: '5-Star hotel hospital tucks, inventory logs & restock',
-      compRow3Other: 'Basic bedding changes without restocking',
-      compRow4Feat: 'Specialist Standards & Trust',
-      compRow4Wg: '100% Background-checked, uniformed & vetted specialists',
+      compRow1Feat: 'Quality Supervision',
+      compRow1Wg: 'Internal checklist & attention to detail',
+      compRow1Other: 'Unverified / No follow-up',
+      compRow2Feat: 'Products & Equipment',
+      compRow2Wg: 'Equipped when needed & adaptable to your surfaces',
+      compRow2Other: 'Generic harsh store chemicals',
+      compRow3Feat: 'Short-Term Rental Support',
+      compRow3Wg: 'Crisp hotel-style presentation & restock alerts',
+      compRow3Other: 'Basic bedding changes without communication',
+      compRow4Feat: 'Team & Trust',
+      compRow4Wg: 'Trusted, trained & uniformed team members',
       compRow4Other: 'Unscreened casual gig workers',
-      compRow5Feat: 'Reliability Guarantee',
-      compRow5Wg: 'Immediate 24-hour complimentary re-touch',
-      compRow5Other: 'No re-touch policy / Slow resolution',
+      compRow5Feat: 'Customer Follow-up',
+      compRow5Wg: 'Direct communication & personalized care',
+      compRow5Other: 'No follow-up / Slow resolution',
       areasOverline: 'Regional Hubs',
       areasTitle: 'International Operations',
       areasSubtitle: 'Consistent executive standards across Canada, the United States, and Mexico.',
@@ -404,21 +413,21 @@ export default function LandingView({ onGoToLogin }) {
       colStandard: 'Estándar del Servicio',
       colWhiteGlove: 'Estándar WhiteGlove',
       colOther: 'Limpieza Convencional',
-      compRow1Feat: 'Inspección y Verificación',
-      compRow1Wg: 'Checklist digital de 50 puntos + reporte fotográfico',
-      compRow1Other: 'Sin verificación ni evidencias fotográficas',
-      compRow2Feat: 'Químicos y Materiales',
-      compRow2Wg: 'pH neutro, seguros para mármol y mascotas',
-      compRow2Other: 'Cloro agresivo y limpiadores genéricos abrasivos',
-      compRow3Feat: 'Manejo de Blancos en Airbnb',
-      compRow3Wg: 'Tendido de hotel 5 estrellas y control de stock',
-      compRow3Other: 'Cambio básico sin control de insumos',
-      compRow4Feat: 'Seguridad del Personal',
-      compRow4Wg: '100% Verificados con antecedentes y uniformados',
-      compRow4Other: 'Trabajadores rotativos no certificados',
-      compRow5Feat: 'Garantía de Satisfacción',
-      compRow5Wg: 'Retoque gratuito inmediato dentro de 24 horas',
-      compRow5Other: 'Sin garantía ni respuesta ágil',
+      compRow1Feat: 'Supervisión y Cuidado',
+      compRow1Wg: 'Checklist interno y atención al detalle',
+      compRow1Other: 'Sin revisión ni seguimiento',
+      compRow2Feat: 'Equipo y Productos',
+      compRow2Wg: 'Llevamos equipo e insumos en caso de necesitarlo',
+      compRow2Other: 'Productos genéricos sin cuidado de superficies',
+      compRow3Feat: 'Apoyo en Airbnb y Rentas',
+      compRow3Wg: 'Presentación estilo hotel y aviso de insumos',
+      compRow3Other: 'Cambio básico sin comunicación con el anfitrión',
+      compRow4Feat: 'Personal de Confianza',
+      compRow4Wg: 'Equipo capacitado, de confianza y uniformado',
+      compRow4Other: 'Personal eventual sin capacitación',
+      compRow5Feat: 'Atención y Seguimiento',
+      compRow5Wg: 'Comunicación directa y atención personalizada',
+      compRow5Other: 'Sin seguimiento ni respuesta ágil',
       areasOverline: 'Sedes Regionales',
       areasTitle: 'Operaciones Internacionales',
       areasSubtitle: 'Estándares ejecutivos uniformes en Canadá, Estados Unidos y México.',
@@ -560,51 +569,140 @@ export default function LandingView({ onGoToLogin }) {
 
   const currentShowcase = serviceShowcaseData[activeServiceTab] || serviceShowcaseData.airbnb;
 
-  // Real Testimonials Data
-  const testimonials = [
-    {
-      name: 'Alexei',
-      location: lang === 'en' ? 'Toronto, ON · Airbnb Host' : 'Toronto, ON · Anfitrión Airbnb',
-      review: lang === 'en'
-        ? 'WhiteGlove transformed my Airbnb turnovers. My guests consistently mention how spotless the space feels. The attention to detail is unmatched.'
-        : 'WhiteGlove transformó mis turnovers de Airbnb. Mis huéspedes constantemente mencionan lo impecable que se siente el espacio. La atención al detalle es inigualable.',
-    },
-    {
-      name: 'Mandy D.',
-      location: lang === 'en' ? 'Markham, ON · Luxury Homeowner' : 'Markham, ON · Residencia Privada',
-      review: lang === 'en'
-        ? 'Reliable, professional, and detail-oriented. I never worry about my property between bookings — WhiteGlove has it covered.'
-        : 'Confiables, profesionales y meticulosos. Nunca me preocupo por mi propiedad entre reservas — WhiteGlove lo tiene todo bajo control.',
-    },
-    {
-      name: 'Rohan',
-      location: lang === 'en' ? 'Downtown Toronto · 3 Properties' : 'Downtown Toronto · 3 Propiedades',
-      review: lang === 'en'
-        ? 'The team manages all three of my units with incredible consistency. Communication is clear, service is impeccable.'
-        : 'El equipo maneja mis tres unidades con una consistencia increíble. La comunicación es clara y el servicio impecable.',
-    },
-    {
-      name: 'Saadman',
-      location: lang === 'en' ? 'Mississauga, ON · Estate Owner' : 'Mississauga, ON · Propietario',
-      review: lang === 'en'
-        ? 'Deep clean service was outstanding. Found that premium touch other companies promise but never deliver.'
-        : 'El servicio de limpieza profunda fue excepcional. Encontré ese toque premium que otras compañías prometen pero nunca entregan.',
-    },
-    {
-      name: 'Max',
-      location: lang === 'en' ? 'Hamilton, ON · Property Manager' : 'Hamilton, ON · Property Manager',
-      review: lang === 'en'
-        ? 'Been working with WhiteGlove for months. Their checklists and property reports make managing from a distance effortless.'
-        : 'He trabajado con WhiteGlove por meses. Sus checklists y reportes de propiedad hacen que administrar a distancia sea sencillo.',
-    },
-    {
-      name: 'Larisse',
-      location: lang === 'en' ? 'Yorkville, Toronto · Penthouse' : 'Yorkville, Toronto · Penthouse',
-      review: lang === 'en'
-        ? 'Michelle and her team are incredible. They treat my home like it was their own. Highly recommend.'
-        : 'Michelle y su equipo son increíbles. Tratan mi casa como si fuera suya. Altamente recomendados.',
-    },
-  ];
+  // Client Reviews State (Newest First, Cloud Synced)
+  const [reviewsList, setReviewsList] = useState(() => getSavedReviews());
+  const [isLeaveReviewOpen, setIsLeaveReviewOpen] = useState(false);
+  const [newReviewName, setNewReviewName] = useState('');
+  const [newReviewLocation, setNewReviewLocation] = useState('');
+  const [newReviewStars, setNewReviewStars] = useState(5);
+  const [newReviewHoverStars, setNewReviewHoverStars] = useState(0);
+  const [newReviewText, setNewReviewText] = useState('');
+  const [newReviewError, setNewReviewError] = useState('');
+  const [newReviewSuccess, setNewReviewSuccess] = useState(false);
+
+  // Admin Review Editing State (Allows Admin to edit "hace cuánto fue publicado", stars, name, or text)
+  const effectiveUser =
+    currentUser ||
+    (() => {
+      try {
+        const raw = localStorage.getItem('wg-current-user');
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    })();
+  const isAdminUser = hasFullAccess(effectiveUser);
+  const [editingReviewId, setEditingReviewId] = useState(null);
+  const [editReviewDraft, setEditReviewDraft] = useState({
+    name: '',
+    location: '',
+    review: '',
+    stars: 5,
+    publishedAt: '',
+    customTimeLabel: '',
+  });
+
+  useEffect(() => {
+    const unsub = subscribeReviewsFromCloud((cloudReviews) => {
+      setReviewsList(cloudReviews);
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
+
+  const handleSubmitClientReview = async (e) => {
+    e.preventDefault();
+    setNewReviewError('');
+    if (!newReviewName.trim()) {
+      setNewReviewError(
+        lang === 'en' ? 'Please enter your name.' : 'Por favor ingresa tu nombre.'
+      );
+      return;
+    }
+    if (!newReviewText.trim() || newReviewText.trim().length < 8) {
+      setNewReviewError(
+        lang === 'en'
+          ? 'Please write a short comment about your experience.'
+          : 'Por favor escribe tu reseña o comentario del servicio.'
+      );
+      return;
+    }
+
+    const cleanLocation =
+      newReviewLocation.trim() ||
+      (lang === 'en' ? 'Verified WhiteGlove Client' : 'Cliente Verificado WhiteGlove');
+
+    const createdReview = {
+      id: `rev-${Date.now()}`,
+      name: newReviewName.trim(),
+      locationEn: cleanLocation,
+      locationEs: cleanLocation,
+      reviewEn: newReviewText.trim(),
+      reviewEs: newReviewText.trim(),
+      stars: Number(newReviewStars) || 5,
+      publishedAt: new Date().toISOString(),
+      customTimeLabel: '',
+    };
+
+    const updated = await saveReviewsToCloud([createdReview, ...reviewsList]);
+    setReviewsList(updated);
+    setNewReviewName('');
+    setNewReviewLocation('');
+    setNewReviewStars(5);
+    setNewReviewText('');
+    setIsLeaveReviewOpen(false);
+    setNewReviewSuccess(true);
+    setTimeout(() => setNewReviewSuccess(false), 5000);
+  };
+
+  const handleStartEditReview = (rev) => {
+    setEditingReviewId(rev.id);
+    setEditReviewDraft({
+      name: rev.name || '',
+      location: (lang === 'en' ? rev.locationEn || rev.location : rev.locationEs || rev.location) || '',
+      review: (lang === 'en' ? rev.reviewEn || rev.review : rev.reviewEs || rev.review) || '',
+      stars: Number(rev.stars) || 5,
+      publishedAt: rev.publishedAt || new Date().toISOString(),
+      customTimeLabel: rev.customTimeLabel || '',
+    });
+  };
+
+  const handleApplyAdminTimePreset = (preset) => {
+    const newIso = new Date(Date.now() - preset.offsetMs).toISOString();
+    setEditReviewDraft((prev) => ({
+      ...prev,
+      publishedAt: newIso,
+      customTimeLabel: '',
+    }));
+  };
+
+  const handleSaveAdminReviewEdit = async (reviewId) => {
+    const nextList = reviewsList.map((r) => {
+      if (r.id !== reviewId) return r;
+      return {
+        ...r,
+        name: editReviewDraft.name.trim() || r.name,
+        locationEn: editReviewDraft.location.trim() || r.locationEn,
+        locationEs: editReviewDraft.location.trim() || r.locationEs,
+        reviewEn: editReviewDraft.review.trim() || r.reviewEn,
+        reviewEs: editReviewDraft.review.trim() || r.reviewEs,
+        stars: Math.min(5, Math.max(1, Number(editReviewDraft.stars) || 5)),
+        publishedAt: editReviewDraft.publishedAt || r.publishedAt || new Date().toISOString(),
+        customTimeLabel: editReviewDraft.customTimeLabel.trim(),
+      };
+    });
+    const saved = await saveReviewsToCloud(nextList);
+    setReviewsList(saved);
+    setEditingReviewId(null);
+  };
+
+  const handleDeleteReview = async (reviewId) => {
+    const nextList = reviewsList.filter((r) => r.id !== reviewId);
+    const saved = await saveReviewsToCloud(nextList);
+    setReviewsList(saved);
+    setEditingReviewId(null);
+  };
 
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-[#0B1D4A] selection:bg-[#FFB566] selection:text-[#0B1D4A] flex flex-col font-sans">
@@ -1416,51 +1514,495 @@ export default function LandingView({ onGoToLogin }) {
         </div>
       </section>
 
-      {/* 8. CLIENT REVIEWS / TESTIMONIALS */}
-      <section id="reviews" className="py-20 bg-white border-b border-slate-200/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+      {/* 8. CLIENT REVIEWS / TESTIMONIALS (Newest First + Interactive Review Submission + Admin Time Ago Editor) */}
+      <section id="reviews" className="py-20 bg-white border-b border-slate-200/80 scroll-mt-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
           
-          <div className="text-center max-w-2xl mx-auto space-y-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-[#E89A45] block">
-              {t.reviewsOverline}
-            </span>
-            <h2 className="font-serif text-3xl sm:text-4xl font-medium text-[#0B1D4A]">
-              {t.reviewsTitle}
-            </h2>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <span className="text-xs font-bold uppercase tracking-widest text-[#E89A45] block">
+                {t.reviewsOverline}
+              </span>
+              <h2 className="font-serif text-3xl sm:text-4xl font-medium text-[#0B1D4A]">
+                {t.reviewsTitle}
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500">
+                {lang === 'en'
+                  ? 'Sorted from newest to oldest · Share your experience with WhiteGlove.'
+                  : 'Ordenados de los más nuevos primero · Comparte tu experiencia con WhiteGlove.'}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Average Rating Summary Badge */}
+              <div className="flex items-center gap-2.5 bg-[#FBF9F5] px-4 py-2.5 rounded-2xl border border-slate-200/80">
+                <div className="flex items-center gap-0.5 text-[#E89A45]">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className="w-4 h-4 fill-current" />
+                  ))}
+                </div>
+                <span className="text-sm font-bold text-[#0B1D4A]">
+                  {(
+                    reviewsList.reduce((acc, r) => acc + (Number(r.stars) || 5), 0) /
+                    Math.max(1, reviewsList.length)
+                  ).toFixed(1)}
+                </span>
+                <span className="text-xs text-slate-500">
+                  ({reviewsList.length} {lang === 'en' ? 'reviews' : 'reseñas'})
+                </span>
+              </div>
+
+              {/* Leave a Review CTA Button */}
+              <button
+                type="button"
+                onClick={() => setIsLeaveReviewOpen((prev) => !prev)}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-[#0B1D4A] hover:bg-[#162d6b] text-[#FFB566] font-bold text-xs uppercase tracking-wider shadow-sm transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>
+                  {isLeaveReviewOpen
+                    ? lang === 'en'
+                      ? 'Close Form'
+                      : 'Cerrar Formulario'
+                    : lang === 'en'
+                    ? 'Leave a Review'
+                    : 'Dejar un Review'}
+                </span>
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {testimonials.map((review, idx) => (
-              <div
-                key={idx}
-                className="bg-[#FBF9F5] p-6 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col justify-between space-y-4"
+          {/* Admin Mode Banner if Admin is logged in */}
+          {isAdminUser && (
+            <div className="bg-[#0B1D4A] text-white px-5 py-3.5 rounded-2xl border border-[#FFB566]/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <p className="text-xs font-medium text-slate-200">
+                  <strong className="text-[#FFB566] font-bold">Modo Administrador Activo:</strong>{' '}
+                  Haz clic en <span className="underline decoration-[#FFB566]">Editar Publicación / Tiempo</span> en cualquier reseña para cambiar hace cuánto fue publicada, sus estrellas o su texto.
+                </p>
+              </div>
+              <span className="text-[11px] font-semibold text-[#FFB566] shrink-0">
+                Sincronizado en tiempo real
+              </span>
+            </div>
+          )}
+
+          {/* Success Banner when a client submits a review */}
+          {newReviewSuccess && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 px-5 py-3.5 rounded-2xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-xs sm:text-sm font-semibold">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>
+                  {lang === 'en'
+                    ? 'Thank you! Your review has been published and appears first below.'
+                    : '¡Gracias por tu confianza! Tu reseña ha sido publicada y aparece de primera en la lista.'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewReviewSuccess(false)}
+                className="text-emerald-700 hover:text-emerald-900 text-xs font-bold"
               >
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1 text-[#E89A45]">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-current" />
-                    ))}
-                  </div>
-                  <p className="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
-                    "{review.review}"
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Interactive Leave a Review Form for Clients */}
+          {isLeaveReviewOpen && (
+            <form
+              onSubmit={handleSubmitClientReview}
+              className="bg-[#FBF9F5] p-6 sm:p-8 rounded-3xl border-2 border-[#FFB566]/50 shadow-md space-y-5 animate-fadeIn"
+            >
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-4">
+                <div>
+                  <h3 className="font-serif text-xl font-bold text-[#0B1D4A]">
+                    {lang === 'en' ? 'Share Your Experience' : 'Deja tu Review sobre WhiteGlove'}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {lang === 'en'
+                      ? 'Your review will be published immediately at the top of our client wall.'
+                      : 'Tu reseña se publicará al instante apareciendo primero en la página.'}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsLeaveReviewOpen(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-                <div className="flex items-center gap-3 pt-3 border-t border-slate-200/60">
-                  <div className="w-8 h-8 rounded-full bg-[#0B1D4A] text-[#FFB566] flex items-center justify-center text-xs font-bold">
-                    {review.name[0]}
-                  </div>
-                  <div>
-                    <span className="font-serif font-bold text-sm text-[#0B1D4A] block leading-none">
-                      {review.name}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-medium mt-0.5 block">
-                      {review.location}
+              {newReviewError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{newReviewError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-[#0B1D4A] uppercase tracking-wider mb-1.5">
+                    {lang === 'en' ? 'Your Name *' : 'Tu Nombre *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newReviewName}
+                    onChange={(e) => setNewReviewName(e.target.value)}
+                    placeholder={lang === 'en' ? 'e.g. Sofía M.' : 'Ej. Sofía M.'}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-[#0B1D4A] focus:outline-none focus:border-[#0B1D4A]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#0B1D4A] uppercase tracking-wider mb-1.5">
+                    {lang === 'en' ? 'City or Service Type' : 'Ciudad o Tipo de Servicio'}
+                  </label>
+                  <input
+                    type="text"
+                    value={newReviewLocation}
+                    onChange={(e) => setNewReviewLocation(e.target.value)}
+                    placeholder={
+                      lang === 'en'
+                        ? 'e.g. Toronto · Luxury Residence'
+                        : 'Ej. Residencia Privada · Limpieza Profunda'
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-[#0B1D4A] focus:outline-none focus:border-[#0B1D4A]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#0B1D4A] uppercase tracking-wider mb-1.5">
+                    {lang === 'en' ? 'Star Rating *' : 'Calificación por Estrellas *'}
+                  </label>
+                  <div className="flex items-center gap-1.5 bg-white px-3.5 py-2 rounded-xl border border-slate-200">
+                    {[1, 2, 3, 4, 5].map((starVal) => {
+                      const active = (newReviewHoverStars || newReviewStars) >= starVal;
+                      return (
+                        <button
+                          key={starVal}
+                          type="button"
+                          onMouseEnter={() => setNewReviewHoverStars(starVal)}
+                          onMouseLeave={() => setNewReviewHoverStars(0)}
+                          onClick={() => setNewReviewStars(starVal)}
+                          className="p-0.5 transition-transform hover:scale-110 cursor-pointer"
+                          title={`${starVal} ★`}
+                        >
+                          <Star
+                            className={`w-6 h-6 ${
+                              active
+                                ? 'text-[#E89A45] fill-[#E89A45]'
+                                : 'text-slate-300 fill-slate-100'
+                            }`}
+                          />
+                        </button>
+                      );
+                    })}
+                    <span className="ml-2 text-xs font-bold text-[#0B1D4A]">
+                      {newReviewStars} / 5 ★
                     </span>
                   </div>
                 </div>
               </div>
-            ))}
+
+              <div>
+                <label className="block text-xs font-bold text-[#0B1D4A] uppercase tracking-wider mb-1.5">
+                  {lang === 'en' ? 'Your Review *' : 'Tu Comentario / Reseña *'}
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={newReviewText}
+                  onChange={(e) => setNewReviewText(e.target.value)}
+                  placeholder={
+                    lang === 'en'
+                      ? 'Tell us how your home or property looked after our visit...'
+                      : 'Cuéntanos qué te pareció la atención al detalle y el resultado en tu propiedad...'
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-[#0B1D4A] focus:outline-none focus:border-[#0B1D4A]"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsLeaveReviewOpen(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  {lang === 'en' ? 'Cancel' : 'Cancelar'}
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#FFB566] hover:bg-[#E89A45] text-[#0B1D4A] font-bold text-xs uppercase tracking-wider shadow-xs transition-all cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{lang === 'en' ? 'Publish Review Now' : 'Publicar Review Ahora'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Reviews Grid (Sorted Newest First) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {reviewsList.map((review, idx) => {
+              const starCount = Math.min(5, Math.max(1, Number(review.stars) || 5));
+              const displayReviewText =
+                lang === 'en'
+                  ? review.reviewEn || review.review || review.reviewEs
+                  : review.reviewEs || review.review || review.reviewEn;
+              const displayLocation =
+                lang === 'en'
+                  ? review.locationEn || review.location || review.locationEs
+                  : review.locationEs || review.location || review.locationEn;
+              const timeAgoLabel = formatReviewTimeAgo(review, lang);
+              const isEditingThis = editingReviewId === review.id;
+
+              return (
+                <div
+                  key={review.id || idx}
+                  className="bg-[#FBF9F5] p-6 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col justify-between space-y-4 relative group transition-all hover:border-[#FFB566]/70"
+                >
+                  {isEditingThis ? (
+                    /* ADMIN INLINE REVIEW & TIME-PUBLISHED EDITOR */
+                    <div className="space-y-3.5">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#0B1D4A] flex items-center gap-1.5">
+                          <Edit3 className="w-3.5 h-3.5 text-[#E89A45]" />
+                          Editar Review y Tiempo
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setEditingReviewId(null)}
+                          className="text-xs font-bold text-slate-400 hover:text-slate-700"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {/* Quick Presets for "Hace cuánto fue publicado" */}
+                      <div className="bg-white p-3 rounded-2xl border border-amber-200/80 space-y-2">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#0B1D4A]">
+                          ⏱️ Configurar hace cuánto fue publicado:
+                        </label>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const preset = ADMIN_TIME_PRESETS.find((p) => p.id === e.target.value);
+                            if (preset) handleApplyAdminTimePreset(preset);
+                          }}
+                          className="w-full px-2.5 py-2 rounded-xl border border-slate-200 bg-[#FBF9F5] text-xs font-semibold text-[#0B1D4A] focus:outline-none focus:border-[#0B1D4A]"
+                        >
+                          <option value="">Elegir tiempo rápido (ej. Hace 2 días, Hace 1 mes...)</option>
+                          {ADMIN_TIME_PRESETS.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.labelEs} ({p.labelEn})
+                            </option>
+                          ))}
+                        </select>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                            O escribe manualmente la leyenda de tiempo (ej. "Hace 4 días"):
+                          </label>
+                          <input
+                            type="text"
+                            value={editReviewDraft.customTimeLabel}
+                            onChange={(e) =>
+                              setEditReviewDraft((prev) => ({
+                                ...prev,
+                                customTimeLabel: e.target.value,
+                              }))
+                            }
+                            placeholder="Ej. Hace 3 días / Hace 2 semanas (opcional)"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-[#0B1D4A] bg-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                            Fecha exacta para el orden (más nuevos primero):
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={
+                              editReviewDraft.publishedAt
+                                ? new Date(
+                                    new Date(editReviewDraft.publishedAt).getTime() -
+                                      new Date().getTimezoneOffset() * 60000
+                                  )
+                                    .toISOString()
+                                    .slice(0, 16)
+                                : ''
+                            }
+                            onChange={(e) => {
+                              if (!e.target.value) return;
+                              const iso = new Date(e.target.value).toISOString();
+                              setEditReviewDraft((prev) => ({
+                                ...prev,
+                                publishedAt: iso,
+                              }));
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-[#0B1D4A] bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                            Nombre Cliente
+                          </label>
+                          <input
+                            type="text"
+                            value={editReviewDraft.name}
+                            onChange={(e) =>
+                              setEditReviewDraft((prev) => ({ ...prev, name: e.target.value }))
+                            }
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-[#0B1D4A] bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                            Estrellas (1-5)
+                          </label>
+                          <select
+                            value={editReviewDraft.stars}
+                            onChange={(e) =>
+                              setEditReviewDraft((prev) => ({
+                                ...prev,
+                                stars: Number(e.target.value),
+                              }))
+                            }
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-[#0B1D4A] bg-white"
+                          >
+                            {[5, 4, 3, 2, 1].map((n) => (
+                              <option key={n} value={n}>
+                                {n} Estrellas ({'★'.repeat(n)})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Ubicación / Servicio
+                        </label>
+                        <input
+                          type="text"
+                          value={editReviewDraft.location}
+                          onChange={(e) =>
+                            setEditReviewDraft((prev) => ({ ...prev, location: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-[#0B1D4A] bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                          Comentario del Review
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={editReviewDraft.review}
+                          onChange={(e) =>
+                            setEditReviewDraft((prev) => ({ ...prev, review: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-[#0B1D4A] bg-white"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteReview(review.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Eliminar</span>
+                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setEditingReviewId(null)}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveAdminReviewEdit(review.id)}
+                            className="px-3.5 py-1.5 rounded-lg bg-[#0B1D4A] text-[#FFB566] text-[11px] font-bold hover:bg-[#162d6b] cursor-pointer"
+                          >
+                            Guardar Cambios
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-3">
+                        {/* Top Bar: Stars + Time Ago Badge */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1 text-[#E89A45]">
+                            {[...Array(5)].map((_, i) => (
+                              <Star
+                                key={i}
+                                className={`w-4 h-4 ${
+                                  i < starCount
+                                    ? 'fill-current text-[#E89A45]'
+                                    : 'text-slate-300 fill-slate-200'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-white px-2.5 py-1 rounded-full border border-slate-200/70">
+                            <Clock className="w-3 h-3 text-[#E89A45]" />
+                            <span>{timeAgoLabel}</span>
+                          </span>
+                        </div>
+
+                        <p className="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
+                          "{displayReviewText}"
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-200/60 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-[#0B1D4A] text-[#FFB566] flex items-center justify-center text-xs font-bold shrink-0">
+                            {(review.name || 'C')[0].toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="font-serif font-bold text-sm text-[#0B1D4A] block leading-none truncate">
+                              {review.name}
+                            </span>
+                            <span className="text-[11px] text-slate-500 font-medium mt-0.5 block truncate">
+                              {displayLocation}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Admin Edit Button right on the review card */}
+                        {isAdminUser && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditReview(review)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-100/80 hover:bg-[#FFB566] text-[#0B1D4A] text-[10px] font-bold transition-colors shrink-0 cursor-pointer"
+                            title="Editar hace cuánto fue publicado o el contenido de este review"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Editar Publicación</span>
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
         </div>
@@ -1479,8 +2021,8 @@ export default function LandingView({ onGoToLogin }) {
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
               {lang === 'en'
-                ? 'Everything you need to know about our equipment, security protocols, Airbnb logistics, and multi-currency billing.'
-                : 'Todo lo que necesitas saber sobre nuestro equipo e insumos, protocolos de seguridad, logística Airbnb y facturación.'}
+                ? 'Clear, practical answers about our equipment, scheduling, property access, and quotes.'
+                : 'Respuestas claras y prácticas sobre nuestro equipo, coordinación de citas, accesos y cotizaciones.'}
             </p>
           </div>
 
@@ -1488,9 +2030,9 @@ export default function LandingView({ onGoToLogin }) {
           <div className="flex flex-wrap items-center justify-center gap-2">
             {[
               { id: 'all', label: lang === 'en' ? 'All Questions' : 'Todas las Preguntas' },
-              { id: 'service', label: lang === 'en' ? 'Equipment & Supplies' : 'Equipo e Insumos' },
-              { id: 'security', label: lang === 'en' ? 'Security & Airbnb' : 'Seguridad y Airbnb' },
-              { id: 'billing', label: lang === 'en' ? 'Rates & Currencies' : 'Tarifas y Monedas' },
+              { id: 'service', label: lang === 'en' ? 'Equipment & Services' : 'Equipo y Servicios' },
+              { id: 'security', label: lang === 'en' ? 'Access & Coordination' : 'Accesos y Coordinación' },
+              { id: 'billing', label: lang === 'en' ? 'Quotes & Scheduling' : 'Cotizaciones y Citas' },
             ].map((cat) => (
               <button
                 key={cat.id}
@@ -1516,56 +2058,56 @@ export default function LandingView({ onGoToLogin }) {
               {
                 category: 'service',
                 q: lang === 'en'
-                  ? 'Do you bring your own HEPA equipment and eco-safe luxury cleaning supplies?'
-                  : '¿Llevan su propio equipo, aspiradoras HEPA e insumos de grado hotelero?',
+                  ? 'Do you bring your own cleaning equipment and products?'
+                  : '¿Llevan su propio equipo y productos de limpieza?',
                 a: lang === 'en'
-                  ? 'Yes. Every WhiteGlove specialist arrives fully equipped with hospital-grade HEPA filtration vacuums, color-coded microfiber systems (to prevent cross-contamination between bathrooms and kitchens), and non-toxic, pH-neutral formulas safe for natural marble, quartz, hardwood, and pets.'
-                  : 'Sí. Nuestro equipo llega completamente equipado con aspiradoras de filtración HEPA, paños de microfibra codificados por color (para evitar contaminación cruzada entre baños y cocina) y productos biodegradables de pH neutro seguros para mármol, cuarzo, maderas finas y mascotas.',
+                  ? 'Yes, we bring all the necessary equipment and cleaning products whenever needed for your service. If you prefer that we use specific products or tools that you already have at your property for certain surfaces, just let us know and we will gladly adapt.'
+                  : 'Sí, llevamos todo el equipo y los productos de limpieza en caso de necesitarlo para tu servicio. Si además prefieres que utilicemos algún producto o artículo específico que ya tengas en tu propiedad para el cuidado de tus superficies, con gusto nos adaptamos.',
               },
               {
                 category: 'security',
                 q: lang === 'en'
-                  ? 'How do you vet your specialists and protect my residence or penthouse?'
-                  : '¿Cómo seleccionan a su personal y cómo protegen la seguridad de mi residencia?',
+                  ? 'Who will come to clean my property?'
+                  : '¿Quién acude a realizar el servicio en mi propiedad?',
                 a: lang === 'en'
-                  ? 'Every specialist undergoes strict background verification, reference checks, and in-person certification under our 50-Point WhiteGlove Standard. We never use unvetted gig-workers, and for recurring clients we assign a consistent, dedicated team familiar with your property.'
-                  : 'Cada especialista pasa por verificación de antecedentes, validación de referencias y certificación práctica en nuestro estándar de 50 puntos. Nunca enviamos personal temporal sin certificar y, en clientes recurrentes, asignamos al mismo equipo de confianza.',
+                  ? 'We work with trusted, trained team members who follow our care and cleanliness guidelines. For recurring services, we aim to keep the same familiar team members assigned to your property whenever scheduling allows.'
+                  : 'Trabajamos con personal de confianza y capacitado en nuestros estándares de limpieza y cuidado. En servicios recurrentes, procuramos asignar al personal que ya conoce tu propiedad siempre que la disponibilidad de agenda lo permita.',
               },
               {
                 category: 'security',
                 q: lang === 'en'
-                  ? 'How do Smart Lock access, lockboxes, and Airbnb turnover windows work?'
-                  : '¿Cómo funciona el acceso con Smart Lock / Lockbox y la rotación para anfitriones de Airbnb?',
+                  ? 'How do you coordinate property access and Airbnb turnovers?'
+                  : '¿Cómo se coordina el acceso a la propiedad o los turnos de Airbnb?',
                 a: lang === 'en'
-                  ? 'We work seamlessly with August, Schlage, Yale Smart Locks, concierges, and lockboxes. Your property access codes and linen instructions are stored in an encrypted internal Technical Property Dossier accessible only to your assigned specialist and supervisor. Upon completion, we send photographic verification and restock alerts.'
-                  : 'Operamos con cerraduras inteligentes (Smart Locks), lockboxes y recepción/concierge. Los códigos e instrucciones de blancos se resguardan en una Ficha Técnica interna confidencial visible únicamente para tu especialista asignado y supervisión. Al terminar cada turnover, confirmamos con reporte visual y aviso de stock.',
+                  ? 'We adapt to the access method that is most convenient for you—whether you receive us in person, leave a key in a lockbox, use a smart lock code, or coordinate through reception. For short-term rental hosts, we stay in direct communication via WhatsApp to align with check-in/out times and let you know if supplies are running low.'
+                  : 'Nos adaptamos a la forma de acceso que te resulte más cómoda: ya sea que nos recibas personalmente, mediante código digital, caja de llaves (lockbox) o recepción. Para anfitriones de Airbnb, mantenemos comunicación directa por WhatsApp para coordinar horarios y avisarte si notamos algún insumo por agotarse.',
               },
               {
                 category: 'service',
                 q: lang === 'en'
-                  ? 'What is the difference between Regular Luxury Housekeeping and a Deep Clean?'
-                  : '¿Cuál es la diferencia entre Housekeeping Residencial y un Deep Clean (Limpieza Profunda)?',
+                  ? 'What is the difference between Regular Cleaning and a Deep Clean?'
+                  : '¿Cuál es la diferencia entre una Limpieza Regular y una Limpieza Profunda?',
                 a: lang === 'en'
-                  ? 'Regular Housekeeping maintains pristine hotel-level order across kitchens, bathrooms, bedrooms, and floors on a weekly or bi-weekly schedule. A Deep Clean includes intensive detailing: baseboards, interior cabinets, oven/fridge detailing, limescale removal on glass showers, window tracks, and beneath furniture.'
-                  : 'El Housekeeping Residencial mantiene tu hogar impecable de forma semanal o quincenal (cocina, baños, pisos y tendido tipo hotel). El Deep Clean añade detallado intensivo: zoclos, interior de gabinetes, desengrasado profundo de campana/horno, desincrustación de canceles de baño y rieles de ventanales.',
+                  ? 'Regular Cleaning covers general maintenance of kitchens, bathrooms, bedrooms, and floors to keep your space fresh and tidy. A Deep Clean allocates additional time for areas with greater buildup and detailed surfaces; if you require specific extra tasks (such as inside ovens, refrigerators, or cabinets), you can mention them when requesting your quote so we include them in your plan.'
+                  : 'La Limpieza Regular se enfoca en el mantenimiento general de cocina, baños, recámaras y pisos para conservar tu espacio limpio y en orden. La Limpieza Profunda dedica mayor tiempo a zonas con acumulación y detallado; si requieres áreas especiales (como interior de horno, refrigerador o alacenas), puedes indicarlo al cotizar para contemplarlo en tu servicio.',
               },
               {
                 category: 'billing',
                 q: lang === 'en'
-                  ? 'Which currencies and payment methods do you accept across Canada, USA, and Mexico?'
-                  : '¿En qué monedas operan y qué métodos de pago o facturación aceptan (CAD, USD, MXN)?',
+                  ? 'How does the online estimate work and how is the final price confirmed?'
+                  : '¿Cómo funciona el estimador en línea y cómo se confirma el precio final?',
                 a: lang === 'en'
-                  ? 'You can quote and settle in the local currency of each hub: CAD ($) in Toronto & GTA / Hamilton (Interac e-Transfer, credit card, or corporate transfer), USD ($) in Seattle, and MXN ($) in Guadalajara (SPEI transfer or card). You can toggle your preferred currency right in our Instant Estimator above.'
-                  : 'Cotizamos y facturamos en la moneda local de cada sede: CAD ($) en Toronto y Hamilton (Interac e-Transfer, tarjeta o transferencia), USD ($) en Seattle y MXN ($) en Guadalajara (transferencia SPEI o tarjeta). Puedes cambiar la moneda directamente en el Estimador Interactivo de arriba.',
+                  ? 'The online calculator gives you a helpful initial estimate based on property size and service type. Before scheduling, our team confirms the final scope and rate with you via WhatsApp or email according to the actual condition and needs of your space.'
+                  : 'El cotizador de la página te brinda un estimado inicial de referencia según el tamaño de tu propiedad y el tipo de servicio. Antes de agendar, confirmamos contigo por WhatsApp o correo el alcance y costo final de acuerdo con las características reales de tu espacio.',
               },
               {
                 category: 'billing',
                 q: lang === 'en'
-                  ? 'What is the WhiteGlove 100% Satisfaction Guarantee and rescheduling policy?'
-                  : '¿Cómo funciona la Garantía WhiteGlove 100% y la política de reprogramación?',
+                  ? 'What if I need to reschedule my appointment or share feedback?'
+                  : '¿Qué pasa si necesito reprogramar mi cita o comentar algún detalle?',
                 a: lang === 'en'
-                  ? 'If any detail of your service does not meet our 50-Point Standard, notify us within 24 hours and our team will return promptly to rectify it at zero additional cost. You can reschedule or adjust any appointment with 24 hours notice via WhatsApp without penalty.'
-                  : 'Si algún detalle no cumple con nuestro protocolo de 50 puntos, avísanos dentro de las primeras 24 horas y nuestro equipo regresará sin costo adicional para corregirlo. Puedes reprogramar tu cita con 24 horas de anticipación vía WhatsApp sin penalización.',
+                  ? 'If you need to change your appointment date or time, please message us via WhatsApp in advance so we can find a new slot subject to schedule availability. If you have any feedback or notice a detail from the agreed scope after a visit, let us know on the same day so we can follow up promptly.'
+                  : 'Si necesitas cambiar la fecha u horario de tu servicio, avísanos con anticipación por WhatsApp para reprogramarlo de acuerdo con la disponibilidad de agenda. Si al finalizar tienes algún comentario o notas algún detalle dentro de lo acordado, escríbenos el mismo día para darle seguimiento oportuno.',
               },
             ]
               .filter((item) => faqCategory === 'all' || item.category === faqCategory)

@@ -1060,10 +1060,61 @@ export default function ServiceModal({
               </div>
             </div>
 
-            {/* Inputs for Hours and Exact Minutes (0 to 59) */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Selector Desplegable + Inputs Manuales para Horas y Minutos Exactos (0 a 59) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <span className="text-[11px] text-slate-500 font-semibold block mb-1">Horas completas:</span>
+                <span className="text-[11px] text-slate-500 font-semibold block mb-1">
+                  Seleccionar en Desplegable:
+                </span>
+                <select
+                  value={`${horasEnteras}:${minutos}`}
+                  onChange={(e) => {
+                    if (e.target.value === 'custom') return;
+                    const [hStr, mStr] = e.target.value.split(':');
+                    handleDurationChange(parseInt(hStr, 10) || 0, parseInt(mStr, 10) || 0);
+                  }}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-bold text-[#0B1D4A] focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] cursor-pointer"
+                >
+                  {[
+                    { label: '0h 30m (Media hora)', h: 0, m: 30 },
+                    { label: '0h 45m (45 minutos)', h: 0, m: 45 },
+                    { label: '1h 00m (1 hora)', h: 1, m: 0 },
+                    { label: '1h 15m', h: 1, m: 15 },
+                    { label: '1h 30m (1 hora y media)', h: 1, m: 30 },
+                    { label: '1h 45m', h: 1, m: 45 },
+                    { label: '2h 00m (2 horas)', h: 2, m: 0 },
+                    { label: '2h 15m', h: 2, m: 15 },
+                    { label: '2h 30m (2 horas y media)', h: 2, m: 30 },
+                    { label: '2h 45m', h: 2, m: 45 },
+                    { label: '3h 00m (3 horas)', h: 3, m: 0 },
+                    { label: '3h 15m', h: 3, m: 15 },
+                    { label: '3h 30m (3 horas y media)', h: 3, m: 30 },
+                    { label: '3h 45m', h: 3, m: 45 },
+                    { label: '4h 00m (4 horas)', h: 4, m: 0 },
+                    { label: '4h 30m (4 horas y media)', h: 4, m: 30 },
+                    { label: '5h 00m (5 horas)', h: 5, m: 0 },
+                    { label: '5h 30m (5 horas y media)', h: 5, m: 30 },
+                    { label: '6h 00m (6 horas)', h: 6, m: 0 },
+                    { label: '6h 30m (6 horas y media)', h: 6, m: 30 },
+                    { label: '7h 00m (7 horas)', h: 7, m: 0 },
+                    { label: '8h 00m (8 horas)', h: 8, m: 0 },
+                    { label: '9h 00m (9 horas)', h: 9, m: 0 },
+                    { label: '10h 00m (10 horas)', h: 10, m: 0 },
+                  ].map((opt) => (
+                    <option key={`${opt.h}:${opt.m}`} value={`${opt.h}:${opt.m}`}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  {![0, 15, 30, 45].includes(minutos) || horasEnteras > 10 ? (
+                    <option value={`${horasEnteras}:${minutos}`}>
+                      Manual: {horasEnteras}h {minutos}m
+                    </option>
+                  ) : null}
+                </select>
+              </div>
+
+              <div>
+                <span className="text-[11px] text-slate-500 font-semibold block mb-1">Horas (Manual):</span>
                 <div className="flex items-center gap-1.5">
                   <input
                     type="number"
@@ -1097,46 +1148,6 @@ export default function ServiceModal({
                 </div>
               </div>
             </div>
-
-            {/* Quick preset buttons including 15, 20, 30, 45 mins */}
-            <div className="pt-1">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1.5">
-                Atajos Rápidos:
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { label: '45m', h: 0, m: 45 },
-                  { label: '1h', h: 1, m: 0 },
-                  { label: '1h 15m', h: 1, m: 15 },
-                  { label: '1h 30m', h: 1, m: 30 },
-                  { label: '1h 45m', h: 1, m: 45 },
-                  { label: '2h', h: 2, m: 0 },
-                  { label: '2h 15m', h: 2, m: 15 },
-                  { label: '2h 30m', h: 2, m: 30 },
-                  { label: '2h 45m', h: 2, m: 45 },
-                  { label: '3h', h: 3, m: 0 },
-                  { label: '3h 30m', h: 3, m: 30 },
-                  { label: '4h', h: 4, m: 0 },
-                  { label: '5h', h: 5, m: 0 },
-                ].map((preset) => {
-                  const isCurrent = horasEnteras === preset.h && minutos === preset.m;
-                  return (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      onClick={() => handleDurationChange(preset.h, preset.m)}
-                      className={`px-2.5 py-1 text-[11px] rounded-lg border font-bold transition-all ${
-                        isCurrent
-                          ? 'bg-[#0B1D4A] text-[#FFB566] border-[#0B1D4A] shadow-2xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </div>
 
           {/* Individual Cleaner Time (Hours & Minutes) and Pay Breakdown */}
@@ -1148,7 +1159,7 @@ export default function ServiceModal({
                     Tiempo Trabajado {canEditPay ? 'y Pago ' : ''}por Cleaner en este Servicio
                   </span>
                   <span className="text-[11px] text-slate-500 block">
-                    Puedes asignar horas distintas a cada cleaner en el mismo servicio (ej. Mafer 5h y Karina 3h)
+                    Puedes seleccionar en el desplegable o escribir manualmente las horas y minutos de cada cleaner
                   </span>
                 </div>
                 {showFinancials && onOpenRatesConfig && (
@@ -1179,7 +1190,7 @@ export default function ServiceModal({
                       key={cl}
                       className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2.5"
                     >
-                      {/* Top row: Cleaner Identity + Individual Hours & Minutes Selectors */}
+                      {/* Top row: Cleaner Identity + Dropdown & Manual Hours/Minutes Selectors */}
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <div className="w-7 h-7 rounded-full bg-[#0B1D4A] text-[#FFB566] font-bold text-xs flex items-center justify-center shrink-0">
@@ -1195,8 +1206,44 @@ export default function ServiceModal({
                           </div>
                         </div>
 
-                        {/* Individual Hours & Exact Minutes Inputs */}
-                        <div className="flex items-center gap-1.5">
+                        {/* Dropdown + Manual Hours & Exact Minutes Inputs */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <select
+                            value={`${clWholeH}:${clMins}`}
+                            onChange={(e) => {
+                              const [hS, mS] = e.target.value.split(':');
+                              handleCleanerIndividualDuration(cl, parseInt(hS, 10) || 0, parseInt(mS, 10) || 0);
+                            }}
+                            className="px-2.5 py-1 text-xs font-bold text-[#0B1D4A] bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#0B1D4A] cursor-pointer"
+                            title={`Seleccionar duración para ${cl}`}
+                          >
+                            {[
+                              { label: '0h 45m', h: 0, m: 45 },
+                              { label: '1h 00m', h: 1, m: 0 },
+                              { label: '1h 30m', h: 1, m: 30 },
+                              { label: '2h 00m', h: 2, m: 0 },
+                              { label: '2h 30m', h: 2, m: 30 },
+                              { label: '3h 00m', h: 3, m: 0 },
+                              { label: '3h 30m', h: 3, m: 30 },
+                              { label: '4h 00m', h: 4, m: 0 },
+                              { label: '4h 30m', h: 4, m: 30 },
+                              { label: '5h 00m', h: 5, m: 0 },
+                              { label: '5h 30m', h: 5, m: 30 },
+                              { label: '6h 00m', h: 6, m: 0 },
+                              { label: '7h 00m', h: 7, m: 0 },
+                              { label: '8h 00m', h: 8, m: 0 },
+                            ].map((opt) => (
+                              <option key={`${opt.h}:${opt.m}`} value={`${opt.h}:${opt.m}`}>
+                                {opt.label}
+                              </option>
+                            ))}
+                            {![0, 30, 45].includes(clMins) || clWholeH > 8 ? (
+                              <option value={`${clWholeH}:${clMins}`}>
+                                Manual: {clWholeH}h {clMins}m
+                              </option>
+                            ) : null}
+                          </select>
+
                           <div className="flex items-center gap-1 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
                             <Clock className="w-3.5 h-3.5 text-[#0B1D4A]" />
                             <input
@@ -1212,7 +1259,7 @@ export default function ServiceModal({
                                 )
                               }
                               className="w-11 text-xs font-bold text-[#0B1D4A] bg-white border border-slate-200 rounded px-1 py-0.5 text-center focus:outline-none"
-                              title={`Horas trabajadas por ${cl}`}
+                              title={`Horas trabajadas por ${cl} (manual)`}
                             />
                             <span className="text-[11px] font-bold text-slate-500">h</span>
                             <input
@@ -1235,36 +1282,13 @@ export default function ServiceModal({
                         </div>
                       </div>
 
-                      {/* Quick 1-click hour chips for this cleaner + Rate/Pay */}
-                      <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-slate-100">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">
-                            Horas de {cl}:
+                      {/* Rate and Pay row (without quick hour chip buttons) */}
+                      {canEditPay && (
+                        <div className="flex items-center justify-between flex-wrap gap-2 pt-1.5 border-t border-slate-100">
+                          <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded font-bold">
+                            Cálculo: ${cleanerHrRate}/hr × {clDecimalHours}h
                           </span>
-                          {[1, 2, 3, 4, 5, 6, 7, 8].map((hQuick) => {
-                            const isSelectedHour = clWholeH === hQuick && clMins === 0;
-                            return (
-                              <button
-                                key={hQuick}
-                                type="button"
-                                onClick={() => handleCleanerIndividualDuration(cl, hQuick, 0)}
-                                className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all cursor-pointer ${
-                                  isSelectedHour
-                                    ? 'bg-[#0B1D4A] text-[#FFB566] border-[#0B1D4A] shadow-2xs'
-                                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                                }`}
-                              >
-                                {hQuick}h
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {canEditPay && (
                           <div className="flex items-center gap-2 ml-auto">
-                            <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-bold">
-                              ${cleanerHrRate}/hr × {clDecimalHours}h
-                            </span>
                             <div className="flex items-center gap-1" title="Pago por hora para este cleaner">
                               <span className="text-[10px] text-slate-400 font-bold">$/h:</span>
                               <input
@@ -1287,8 +1311,8 @@ export default function ServiceModal({
                               <span className="text-[10px] text-slate-400 font-semibold">CAD</span>
                             </div>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
