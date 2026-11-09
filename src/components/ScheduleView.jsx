@@ -1053,31 +1053,15 @@ export default function ScheduleView({
             </button>
           </div>
 
-          {/* Excel Download & Google Sheets Sync Buttons */}
+          {/* Excel Download Button */}
           <button
             type="button"
-            onClick={() => {
-              setExportSheetsInitialTab('excel');
-              setIsExportSheetsOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
+            onClick={() => setIsExportSheetsOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
             title="Descargar la programación del calendario en un archivo de Excel (.xls o .csv)"
           >
-            <Download className="w-3.5 h-3.5 text-emerald-700" />
+            <Download className="w-3.5 h-3.5" />
             <span>Descargar Excel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setExportSheetsInitialTab('sheets');
-              setIsExportSheetsOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-[#0B1D4A] border border-slate-300 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
-            title="Vincular y sincronizar el calendario con tu hoja de control en Google Sheets (Google Drive)"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Google Sheets</span>
           </button>
 
           {/* Quick Capture / Add Buttons */}

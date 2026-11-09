@@ -23,16 +23,26 @@ import {
 // Initialize Firebase App
 export const app = initializeApp(firebaseConfig);
 
+const FIRESTORE_DB_ID =
+  firebaseConfig?.firestoreDatabaseId ||
+  'ai-studio-whitegloveapp-93a9352b-962c-4654-a80f-f6fdc3e00b17';
+
 // CRITICAL: Initialize Firestore with experimentalForceLongPolling enabled.
 // This prevents [code=unavailable] and "Could not reach Cloud Firestore backend"
 // connection errors inside iframe previews, proxies, and cloud sandbox environments.
-export const db = initializeFirestore(
-  app,
-  {
-    experimentalForceLongPolling: true,
-  },
-  firebaseConfig.firestoreDatabaseId
-);
+export const db = (() => {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        experimentalForceLongPolling: true,
+      },
+      FIRESTORE_DB_ID
+    );
+  } catch {
+    return getFirestore(app, FIRESTORE_DB_ID);
+  }
+})();
 export const auth = getAuth(app);
 
 export const OperationType = {

@@ -3,6 +3,7 @@
   "appId": "1:989935558793:web:f330a138df92a6f44b6658",
   "apiKey": "AIzaSyBtjT0iRCDfYffEwgVz481eJqpwm2Mcf_Q",
   "authDomain": "gen-lang-client-0469105337.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-whitegloveapp-93a9352b-962c-4654-a80f-f6fdc3e00b17",
   "storageBucket": "gen-lang-client-0469105337.firebasestorage.app",
   "messagingSenderId": "989935558793",
   "measurementId": "",
