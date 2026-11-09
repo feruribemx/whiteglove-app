@@ -60,14 +60,50 @@ export const svcFromDb = (r) => {
 
   const rawRates = r.rates_por_cleaner ? { ...r.rates_por_cleaner } : null;
   let horasPorCleaner = r.horasPorCleaner || r.horas_por_cleaner || null;
-  if (rawRates && rawRates.__horasPorCleaner) {
-    if (!horasPorCleaner) horasPorCleaner = rawRates.__horasPorCleaner;
-    delete rawRates.__horasPorCleaner;
+  let cobranzaStatus = r.cobranzaStatus || r.cobranza_status || null;
+  let fechaCobro = r.fechaCobro || r.fecha_cobro || null;
+  let metodoCobro = r.metodoCobro || r.metodo_cobro || null;
+  let clockIn = r.clockIn || r.clock_in || null;
+  let clockOut = r.clockOut || r.clock_out || null;
+  let hora = r.hora || null;
+
+  if (rawRates) {
+    if (rawRates.__horasPorCleaner) {
+      if (!horasPorCleaner) horasPorCleaner = rawRates.__horasPorCleaner;
+      delete rawRates.__horasPorCleaner;
+    }
+    if (rawRates.__cobranzaStatus) {
+      if (!cobranzaStatus) cobranzaStatus = rawRates.__cobranzaStatus;
+      delete rawRates.__cobranzaStatus;
+    }
+    if (rawRates.__fechaCobro) {
+      if (!fechaCobro) fechaCobro = rawRates.__fechaCobro;
+      delete rawRates.__fechaCobro;
+    }
+    if (rawRates.__metodoCobro) {
+      if (!metodoCobro) metodoCobro = rawRates.__metodoCobro;
+      delete rawRates.__metodoCobro;
+    }
+    if (rawRates.__clockIn) {
+      if (!clockIn) clockIn = rawRates.__clockIn;
+      delete rawRates.__clockIn;
+    }
+    if (rawRates.__clockOut) {
+      if (!clockOut) clockOut = rawRates.__clockOut;
+      delete rawRates.__clockOut;
+    }
+    if (rawRates.__hora) {
+      if (!hora) hora = rawRates.__hora;
+      delete rawRates.__hora;
+    }
   }
 
   return {
     id: Number(r.id),
     fecha: r.fecha,
+    hora: hora || clockIn || '09:00',
+    clockIn: clockIn || null,
+    clockOut: clockOut || null,
     unidad: r.unidad,
     cleaners: r.cleaners || [],
     cleaner: (r.cleaners || [])[0] || '',
@@ -75,6 +111,9 @@ export const svcFromDb = (r) => {
     horasPorCleaner: horasPorCleaner || null,
     tipo: isCancelled && r.tipo === 'Cancelado' ? 'Limpieza' : (r.tipo || 'Limpieza'),
     cobro: r.cobro !== null && r.cobro !== undefined ? Number(r.cobro) : null,
+    cobranzaStatus: cobranzaStatus || 'pendiente',
+    fechaCobro: fechaCobro || '',
+    metodoCobro: metodoCobro || 'E-Transfer',
     pagoCleaner: r.pago_cleaner !== null && r.pago_cleaner !== undefined ? Number(r.pago_cleaner) : null,
     pagosPorCleaner: r.pagos_por_cleaner || null,
     ratesPorCleaner: rawRates && Object.keys(rawRates).length ? rawRates : null,
@@ -91,13 +130,28 @@ export const svcToDb = (s) => {
     capt = `[CANCELADO] ${capt}`.trim();
   }
 
-  const combinedRates =
-    s.ratesPorCleaner || s.horasPorCleaner
-      ? {
-          ...(s.ratesPorCleaner || {}),
-          ...(s.horasPorCleaner ? { __horasPorCleaner: s.horasPorCleaner } : {}),
-        }
-      : null;
+  const hasMeta =
+    s.ratesPorCleaner ||
+    s.horasPorCleaner ||
+    s.cobranzaStatus ||
+    s.fechaCobro ||
+    s.metodoCobro ||
+    s.clockIn ||
+    s.clockOut ||
+    s.hora;
+
+  const combinedRates = hasMeta
+    ? {
+        ...(s.ratesPorCleaner || {}),
+        ...(s.horasPorCleaner ? { __horasPorCleaner: s.horasPorCleaner } : {}),
+        ...(s.cobranzaStatus ? { __cobranzaStatus: s.cobranzaStatus } : {}),
+        ...(s.fechaCobro ? { __fechaCobro: s.fechaCobro } : {}),
+        ...(s.metodoCobro ? { __metodoCobro: s.metodoCobro } : {}),
+        ...(s.clockIn ? { __clockIn: s.clockIn } : {}),
+        ...(s.clockOut ? { __clockOut: s.clockOut } : {}),
+        ...(s.hora ? { __hora: s.hora } : {}),
+      }
+    : null;
 
   return {
     id: s.id,

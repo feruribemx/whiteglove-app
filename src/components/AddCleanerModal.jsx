@@ -42,7 +42,7 @@ export default function AddCleanerModal({
       setIsSubmitting(true);
       await onAddCleaner({
         name: trimmedName,
-        password: password.trim() || trimmedName.toLowerCase(),
+        password: password.trim() || `${trimmedName.toLowerCase().split(/\s+/)[0]}123`,
         phone: phone.trim(),
         notes: notes.trim(),
       });
@@ -68,10 +68,10 @@ export default function AddCleanerModal({
         if (e.key === 'Escape') onClose();
       }}
     >
-      <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
+      <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col">
         
         {/* Header */}
-        <div className="bg-[#0B1D4A] text-white p-5 flex items-center justify-between">
+        <div className="bg-[#0B1D4A] text-white p-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-[#FFB566] text-[#0B1D4A] rounded-2xl shadow-xs">
               <UserPlus className="w-5 h-5 stroke-[2.5]" />
@@ -81,7 +81,7 @@ export default function AddCleanerModal({
                 Registrar Nuevo Cleaner
               </h3>
               <span className="text-xs text-slate-300 block">
-                Agrega un nuevo elemento al equipo de operaciones
+                Agrega un nuevo elemento al equipo y consulta claves del checador
               </span>
             </div>
           </div>
@@ -95,7 +95,7 @@ export default function AddCleanerModal({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
           
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center gap-2">
@@ -130,7 +130,7 @@ export default function AddCleanerModal({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-700">
-                Contraseña de Acceso al Portal
+                Contraseña de Acceso al Reloj Checador
               </label>
               <span className="text-[10px] text-slate-400 font-medium">Opcional</span>
             </div>
@@ -138,14 +138,14 @@ export default function AddCleanerModal({
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
               <input
                 type="text"
-                placeholder={name.trim() ? `Por defecto: "${name.trim().toLowerCase()}"` : 'Por defecto su nombre en minúsculas'}
+                placeholder={name.trim() ? `Por defecto: "${name.trim().toLowerCase().split(/\s+/)[0]}123"` : 'Por defecto: nombre123 (ej. valeria123)'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B1D4A] bg-white"
               />
             </div>
             <span className="text-[11px] text-slate-500 block mt-1">
-              El cleaner usará esta contraseña para iniciar sesión en su portal móvil de turnos.
+              El cleaner podrá ingresar con <strong>{name.trim() ? `${name.trim().toLowerCase().split(/\s+/)[0]}123` : 'su nombre + 123'}</strong> o con su nombre en minúsculas.
             </span>
           </div>
 
@@ -188,16 +188,34 @@ export default function AddCleanerModal({
             </div>
           </div>
 
-          {/* Benefits Info Box */}
-          <div className="bg-[#FFF8EC] border border-[#FFB566]/60 rounded-2xl p-3 text-xs text-amber-950 flex items-start gap-2.5">
-            <Sparkles className="w-4 h-4 text-[#E89A45] shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <span className="font-bold block">Integración Inmediata</span>
-              <p className="text-[11px] text-amber-900 leading-relaxed">
-                Al registrarlo, el cleaner estará disponible de inmediato en captura de servicios, asignación de turnos en el calendario y cálculo de nómina quincenal.
+          {/* Active Cleaner Credentials Reference Box */}
+          {existingCleaners.length > 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-xs space-y-2">
+              <span className="font-bold text-[#0B1D4A] flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-[#E89A45]" />
+                Claves Activas del Equipo (Para entrar al Reloj Checador):
+              </span>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                {existingCleaners.map((clName) => {
+                  const baseKey = String(clName || '').trim().toLowerCase().split(/\s+/)[0];
+                  return (
+                    <div
+                      key={clName}
+                      className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-slate-200/80"
+                    >
+                      <span className="font-bold text-slate-800 truncate">{clName}</span>
+                      <code className="font-mono font-bold text-[#0B1D4A] bg-amber-100/70 px-1.5 py-0.5 rounded">
+                        {baseKey}123
+                      </code>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-slate-500">
+                * También pueden acceder escribiendo su nombre en minúsculas (ej. <strong>jazz</strong>, <strong>karen</strong>, <strong>mafer</strong>).
               </p>
             </div>
-          </div>
+          )}
 
           {/* Actions */}
           <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
