@@ -28,9 +28,13 @@ import {
   Send,
   Phone,
   FileText,
+  Download,
+  FileSpreadsheet,
+  Link2,
 } from 'lucide-react';
 import { isMariaOrFerCastil, isMaferCleaner } from '../lib/auth';
 import { resolveClientMemory, getClientDossier } from '../lib/clientMemory';
+import ScheduleExportSheetsModal from './ScheduleExportSheetsModal';
 
 const normalizeDateKey = (dateVal) => {
   if (!dateVal) return '';
@@ -166,6 +170,10 @@ export default function ScheduleView({
   const [waPhoneInput, setWaPhoneInput] = useState('');
   const [waIncludeDossier, setWaIncludeDossier] = useState(true);
   const [waCopied, setWaCopied] = useState(false);
+
+  // Excel Download & Google Sheets Integration Modal State
+  const [isExportSheetsOpen, setIsExportSheetsOpen] = useState(false);
+  const [exportSheetsInitialTab, setExportSheetsInitialTab] = useState('excel');
 
   const getCleanerPhoneFromDb = (targetCleanerName) => {
     if (!targetCleanerName) return '';
@@ -1044,6 +1052,33 @@ export default function ScheduleView({
               <span>Tarjetas</span>
             </button>
           </div>
+
+          {/* Excel Download & Google Sheets Sync Buttons */}
+          <button
+            type="button"
+            onClick={() => {
+              setExportSheetsInitialTab('excel');
+              setIsExportSheetsOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
+            title="Descargar la programación del calendario en un archivo de Excel (.xls o .csv)"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Descargar Excel</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setExportSheetsInitialTab('sheets');
+              setIsExportSheetsOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-[#0B1D4A] border border-slate-300 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
+            title="Vincular y sincronizar el calendario con tu hoja de control en Google Sheets (Google Drive)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Google Sheets</span>
+          </button>
 
           {/* Quick Capture / Add Buttons */}
           {onOpenNewService && (
@@ -2630,6 +2665,20 @@ export default function ScheduleView({
           </div>
         </div>
       )}
+
+      {/* Excel Download & Google Sheets Integration Modal */}
+      <ScheduleExportSheetsModal
+        isOpen={isExportSheetsOpen}
+        onClose={() => setIsExportSheetsOpen(false)}
+        unifiedCalendarItems={filteredItems}
+        availableCleaners={availableCleaners}
+        currentDate={currentDate}
+        selectedDate={selectedDate}
+        todayStr={todayStr}
+        clientMemory={clientMemory}
+        onAddSchedule={onAddSchedule}
+        initialTab={exportSheetsInitialTab}
+      />
     </div>
   );
 }

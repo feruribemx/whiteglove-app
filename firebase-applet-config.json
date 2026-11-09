@@ -1,12 +1,11 @@
 {
-  "projectId": "ultimate-rookery-fc70r",
-  "appId": "1:491270884740:web:0c34f4b51260e78bdc21d1",
-  "apiKey": "AIzaSyCMKu_B8frmzFyIt8MIOiA86dnm9yY_ej8",
-  "authDomain": "ultimate-rookery-fc70r.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-whitegloveapp-93a9352b-962c-4654-a80f-f6fdc3e00b17",
-  "storageBucket": "ultimate-rookery-fc70r.firebasestorage.app",
-  "messagingSenderId": "491270884740",
+  "projectId": "gen-lang-client-0469105337",
+  "appId": "1:989935558793:web:f330a138df92a6f44b6658",
+  "apiKey": "AIzaSyBtjT0iRCDfYffEwgVz481eJqpwm2Mcf_Q",
+  "authDomain": "gen-lang-client-0469105337.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0469105337.firebasestorage.app",
+  "messagingSenderId": "989935558793",
   "measurementId": "",
-  "oAuthClientId": "491270884740-fvqbm255abbn4edg2tbm3elccpo478qm.apps.googleusercontent.com",
+  "oAuthClientId": "989935558793-3ba44iil5euu0cujukblesnkpi9oklg5.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
