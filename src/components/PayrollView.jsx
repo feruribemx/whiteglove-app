@@ -25,6 +25,11 @@ import {
   buildPaymentKey,
 } from '../lib/payrollPayments';
 import { openPrintableVoucher } from '../lib/voucherPdf';
+import {
+  getSavedRatesConfig,
+  resolveCleanerHourlyRate,
+  resolveClientHourlyRate,
+} from '../lib/ratesConfig';
 
 // Helper to format ISO YYYY-MM-DD
 function toDateStr(d) {
@@ -104,8 +109,10 @@ export default function PayrollView({
   services = [],
   cleaners = [],
   onEditService,
+  onUpdateService,
   onCancelService,
   onOpenAddCleaner,
+  ratesConfig = null,
   currentUser,
 }) {
   const isSupervisorFer = Boolean(
@@ -213,7 +220,128 @@ export default function PayrollView({
   const [historySearch, setHistorySearch] = useState('');
   const [historyCleanerFilter, setHistoryCleanerFilter] = useState('all');
 
+  // Inline Time & Pay Editor state for Payroll Breakdown Table
+  const [inlineEditId, setInlineEditId] = useState(null);
+  const [inlineEditDraft, setInlineEditDraft] = useState({
+    horasEnteras: 2,
+    minutos: 0,
+    clockIn: '',
+    clockOut: '',
+    rate: 20,
+    pagoBase: 40,
+  });
+
   const adminName = currentUser?.displayName || currentUser?.username || 'Administrador';
+  const activeRatesCfg = ratesConfig || getSavedRatesConfig();
+
+  // Helper to split decimal hours into exact whole hours and minutes (0..59)
+  const splitExactHoursAndMins = (decHours) => {
+    const num = Math.max(0, Number(decHours) || 0);
+    let h = Math.floor(num);
+    let m = Math.round((num - h) * 60);
+    if (m >= 60) {
+      h += 1;
+      m = 0;
+    }
+    return { h, m: Math.max(0, m) };
+  };
+
+  // Master function to update a cleaner's shift time/pay directly from Payroll and sync Services + Accounting
+  const handleQuickUpdateServiceTime = (
+    rawService,
+    targetCleaner,
+    newWholeH,
+    newMins,
+    customClockIn = undefined,
+    customClockOut = undefined,
+    customRate = undefined,
+    customPagoBase = undefined
+  ) => {
+    if (!rawService || !onUpdateService) return;
+    const h = Math.max(0, parseInt(newWholeH, 10) || 0);
+    const m = Math.min(59, Math.max(0, parseInt(newMins, 10) || 0));
+    const newDecimalHours = parseFloat((h + m / 60).toFixed(2));
+    const safeHours = newDecimalHours > 0 ? newDecimalHours : 0.25;
+
+    const unitName = rawService.unidad || 'Cliente General';
+    const rawCleaners =
+      Array.isArray(rawService.cleaners) && rawService.cleaners.length > 0
+        ? rawService.cleaners
+        : rawService.cleaner
+        ? [rawService.cleaner]
+        : [targetCleaner];
+
+    const currentRates = { ...(rawService.ratesPorCleaner || {}) };
+    const resolvedRate =
+      customRate !== undefined && customRate !== null && customRate !== ''
+        ? Number(customRate)
+        : currentRates[targetCleaner] != null
+        ? Number(currentRates[targetCleaner])
+        : resolveCleanerHourlyRate(targetCleaner, unitName, activeRatesCfg, 20);
+    currentRates[targetCleaner] = resolvedRate;
+
+    const currentHorasMap = { ...(rawService.horasPorCleaner || {}) };
+    rawCleaners.forEach((cl) => {
+      if (currentHorasMap[cl] == null) {
+        currentHorasMap[cl] = Number(rawService.horas) || safeHours;
+      }
+    });
+    currentHorasMap[targetCleaner] = safeHours;
+
+    const distinctHours = new Set(Object.values(currentHorasMap));
+    const updatedTotalHoras =
+      rawCleaners.length === 1 || distinctHours.size === 1
+        ? safeHours
+        : parseFloat(
+            Object.values(currentHorasMap)
+              .reduce((acc, v) => acc + (Number(v) || 0), 0)
+              .toFixed(2)
+          );
+
+    const currentPagosMap = { ...(rawService.pagosPorCleaner || {}) };
+    rawCleaners.forEach((cl) => {
+      if (cl === targetCleaner) {
+        currentPagosMap[cl] =
+          customPagoBase !== undefined && customPagoBase !== null && customPagoBase !== ''
+            ? parseFloat(Number(customPagoBase).toFixed(2))
+            : parseFloat((resolvedRate * safeHours).toFixed(2));
+      } else if (currentPagosMap[cl] == null) {
+        const r =
+          currentRates[cl] != null
+            ? Number(currentRates[cl])
+            : resolveCleanerHourlyRate(cl, unitName, activeRatesCfg, 20);
+        const clH = Number(currentHorasMap[cl]) || updatedTotalHoras;
+        currentPagosMap[cl] = parseFloat((r * clH).toFixed(2));
+      }
+    });
+
+    const updatedTotalPagoCleaner = parseFloat(
+      Object.values(currentPagosMap)
+        .reduce((sum, v) => sum + (Number(v) || 0), 0)
+        .toFixed(2)
+    );
+
+    // Keep client billing (cobro) aligned if client uses hourly rate in ratesConfig
+    let updatedCobro = rawService.cobro;
+    const clientHrRate = resolveClientHourlyRate(unitName, activeRatesCfg);
+    if (clientHrRate != null && clientHrRate > 0) {
+      updatedCobro = parseFloat((clientHrRate * updatedTotalHoras).toFixed(2));
+    }
+
+    const updatedPayload = {
+      ...rawService,
+      horas: updatedTotalHoras,
+      horasPorCleaner: currentHorasMap,
+      ratesPorCleaner: currentRates,
+      pagosPorCleaner: currentPagosMap,
+      pagoCleaner: updatedTotalPagoCleaner,
+      cobro: updatedCobro,
+      ...(customClockIn !== undefined ? { clockIn: customClockIn, hora: customClockIn || rawService.hora } : {}),
+      ...(customClockOut !== undefined ? { clockOut: customClockOut } : {}),
+    };
+
+    onUpdateService(updatedPayload);
+  };
 
   // Compute active date range and descriptive label + stable periodKey
   const { dateFilterLabel, isDateInRange, periodTypeLabel, periodKey } = useMemo(() => {
@@ -710,18 +838,27 @@ export default function PayrollView({
     setPayNotes('');
   };
 
-  // Confirm payment registration
+  //Confirm payment registration
   const handleConfirmPayment = (e) => {
     e?.preventDefault();
     if (!payModalTarget) return;
 
+    // Always use live recalculated cleanerStatsMap values in case Admin edited shift times inside the modal!
+    const liveRow = cleanerStatsMap[payModalTarget.cleaner];
+    const finalPendingList =
+      liveRow?.pendingServicesList && liveRow.pendingServicesList.length > 0
+        ? liveRow.pendingServicesList
+        : payModalTarget.servicesToPay;
+    const finalAmount = liveRow ? liveRow.pendingPay : payModalTarget.amount;
+    const finalHours = liveRow ? liveRow.pendingHours : payModalTarget.hours;
+
     markCleanerPayrollAsPaid(payModalTarget.cleaner, payModalTarget.periodKey, {
       periodLabel: payModalTarget.periodLabel,
       periodType: payModalTarget.periodType,
-      amount: payModalTarget.amount,
-      hours: payModalTarget.hours,
-      servicesCount: payModalTarget.servicesCount,
-      servicesToPay: payModalTarget.servicesToPay,
+      amount: finalAmount,
+      hours: finalHours,
+      servicesCount: finalPendingList.length,
+      servicesToPay: finalPendingList,
       paymentMethod: payMethod,
       reference: payReference.trim(),
       notes: payNotes.trim(),
@@ -882,12 +1019,16 @@ export default function PayrollView({
       : `https://wa.me/?text=${encodeURIComponent(text)}`;
 
     try {
-      const win = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!win) {
-        navigator.clipboard.writeText(text);
-        setCopiedNotification(true);
-        setTimeout(() => setCopiedNotification(false), 3500);
-      }
+      navigator.clipboard.writeText(text);
+      setCopiedNotification(true);
+      setTimeout(() => setCopiedNotification(false), 3500);
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch {
       navigator.clipboard.writeText(text);
       setCopiedNotification(true);
@@ -2179,94 +2320,396 @@ export default function PayrollView({
 
                             const isCancelled = svc.status === 'cancelado';
                             const isPaidPrev = svc.isAlreadyPaid;
+                            const isEditingInline = inlineEditId === svc.id;
+                            const { h: curH, m: curM } = splitExactHoursAndMins(svc.horas);
+                            const currentRate =
+                              svc.rawService?.ratesPorCleaner?.[activeCleanerData.cleaner] ??
+                              resolveCleanerHourlyRate(
+                                activeCleanerData.cleaner,
+                                svc.unidad,
+                                activeRatesCfg,
+                                20
+                              );
+
                             return (
-                              <tr
-                                key={svc.id}
-                                className={`transition-colors ${
-                                  isCancelled
-                                    ? 'bg-rose-50/50 text-slate-400 line-through'
-                                    : isPaidPrev
-                                    ? 'bg-emerald-50/50 hover:bg-emerald-50 text-slate-800'
-                                    : 'hover:bg-amber-50/40 text-slate-800'
-                                }`}
-                              >
-                                <td className="px-4 py-3 font-semibold whitespace-nowrap">
-                                  <div className="flex items-center gap-1.5">
-                                    {isPaidPrev && (
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" title="Turno ya liquidado en nómina previa (no se vuelve a sumar)" />
+                              <React.Fragment key={svc.id}>
+                                <tr
+                                  className={`transition-colors ${
+                                    isCancelled
+                                      ? 'bg-rose-50/50 text-slate-400 line-through'
+                                      : isPaidPrev
+                                      ? 'bg-emerald-50/50 hover:bg-emerald-50 text-slate-800'
+                                      : 'hover:bg-amber-50/40 text-slate-800'
+                                  }`}
+                                >
+                                  <td className="px-4 py-3 font-semibold whitespace-nowrap">
+                                    <div className="flex items-center gap-1.5">
+                                      {isPaidPrev && (
+                                        <CheckCircle2
+                                          className="w-3.5 h-3.5 text-emerald-600 shrink-0"
+                                          title="Turno ya liquidado en nómina previa (no se vuelve a sumar)"
+                                        />
+                                      )}
+                                      <span>{svc.fecha}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap">
+                                    <div className="flex items-center gap-1.5">
+                                      <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>{svc.unidad}</span>
+                                      {svc.coCleaners?.length > 0 && (
+                                        <span className="text-[10px] text-slate-500 font-normal no-underline">
+                                          (con {svc.coCleaners.join(', ')})
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 whitespace-nowrap">
+                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold">
+                                      {svc.tipo}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center tabular-nums whitespace-nowrap">
+                                    <div className="flex flex-col items-center gap-1">
+                                      <div className="inline-flex items-center gap-1.5">
+                                        {!isCancelled && onUpdateService && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const totalM = Math.max(15, curH * 60 + curM - 15);
+                                              handleQuickUpdateServiceTime(
+                                                svc.rawService,
+                                                activeCleanerData.cleaner,
+                                                Math.floor(totalM / 60),
+                                                totalM % 60
+                                              );
+                                            }}
+                                            className="no-print px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold transition-colors cursor-pointer"
+                                            title="Restar 15 minutos a este turno"
+                                          >
+                                            -15m
+                                          </button>
+                                        )}
+                                        <span className="font-bold text-[#0B1D4A]">
+                                          {formatHoursAndMinutes(svc.horas)}
+                                        </span>
+                                        {!isCancelled && onUpdateService && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const totalM = curH * 60 + curM + 15;
+                                              handleQuickUpdateServiceTime(
+                                                svc.rawService,
+                                                activeCleanerData.cleaner,
+                                                Math.floor(totalM / 60),
+                                                totalM % 60
+                                              );
+                                            }}
+                                            className="no-print px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold transition-colors cursor-pointer"
+                                            title="Sumar 15 minutos a este turno"
+                                          >
+                                            +15m
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      {(svc.rawService?.clockIn || svc.rawService?.clockOut) && (
+                                        <span
+                                          className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded"
+                                          title="Horario de Reloj Checador (Entrada → Salida)"
+                                        >
+                                          ⏱️ {svc.rawService.clockIn || '—'} → {svc.rawService.clockOut || '—'}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                                    <span className="font-semibold">${svc.pagoBase.toFixed(2)}</span>
+                                    <span className="text-[10px] text-slate-400 block">
+                                      (${currentRate}/hr)
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-amber-700 font-semibold tabular-nums whitespace-nowrap">
+                                    {svc.tip > 0 ? `+$${svc.tip.toFixed(2)}` : '—'}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-bold tabular-nums whitespace-nowrap">
+                                    {isPaidPrev ? (
+                                      <div className="flex flex-col items-end">
+                                        <span className="text-emerald-900">${svc.subtotal.toFixed(2)}</span>
+                                        <span className="text-[9px] text-emerald-700 font-bold uppercase tracking-tight">
+                                          Ya Pagado
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-[#0B1D4A]">${svc.subtotal.toFixed(2)}</span>
                                     )}
-                                    <span>{svc.fecha}</span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap">
-                                  <div className="flex items-center gap-1.5">
-                                    <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                                    <span>{svc.unidad}</span>
-                                    {svc.coCleaners?.length > 0 && (
-                                      <span className="text-[10px] text-slate-500 font-normal no-underline">
-                                        (con {svc.coCleaners.join(', ')})
+                                  </td>
+                                  <td className="px-4 py-3 text-center whitespace-nowrap">
+                                    {isCancelled ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold">
+                                        <Ban className="w-3 h-3 text-rose-600" /> Cancelado
+                                      </span>
+                                    ) : isPaidPrev ? (
+                                      <span
+                                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300"
+                                        title={
+                                          svc.paidRecord?.periodLabel
+                                            ? `Liquidado en: ${svc.paidRecord.periodLabel}`
+                                            : 'Liquidado en nómina previa'
+                                        }
+                                      >
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                        <span>Ya Pagado</span>
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                                        <Clock className="w-3 h-3 text-amber-600" /> Pendiente
                                       </span>
                                     )}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 whitespace-nowrap">
-                                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold">
-                                    {svc.tipo}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-center tabular-nums whitespace-nowrap">
-                                  {formatHoursAndMinutes(svc.horas)}
-                                </td>
-                                <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
-                                  ${svc.pagoBase.toFixed(2)}
-                                </td>
-                                <td className="px-4 py-3 text-right text-amber-700 font-semibold tabular-nums whitespace-nowrap">
-                                  {svc.tip > 0 ? `+$${svc.tip.toFixed(2)}` : '—'}
-                                </td>
-                                <td className="px-4 py-3 text-right font-bold tabular-nums whitespace-nowrap">
-                                  {isPaidPrev ? (
-                                    <div className="flex flex-col items-end">
-                                      <span className="text-emerald-900">${svc.subtotal.toFixed(2)}</span>
-                                      <span className="text-[9px] text-emerald-700 font-bold uppercase tracking-tight">Ya Pagado</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center no-print whitespace-nowrap">
+                                    <div className="inline-flex items-center gap-1">
+                                      {!isCancelled && onUpdateService && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (isEditingInline) {
+                                              setInlineEditId(null);
+                                            } else {
+                                              setInlineEditId(svc.id);
+                                              setInlineEditDraft({
+                                                horasEnteras: curH,
+                                                minutos: curM,
+                                                clockIn: svc.rawService?.clockIn || svc.rawService?.hora || '09:00',
+                                                clockOut: svc.rawService?.clockOut || '',
+                                                rate: currentRate,
+                                                pagoBase: svc.pagoBase,
+                                              });
+                                            }
+                                          }}
+                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${
+                                            isEditingInline
+                                              ? 'bg-[#0B1D4A] text-[#FFB566] border-[#0B1D4A]'
+                                              : 'bg-amber-50 hover:bg-amber-100 text-[#0B1D4A] border-amber-300'
+                                          }`}
+                                          title="Editar horas, minutos, hora de entrada/salida o pago directamente en la nómina"
+                                        >
+                                          <Clock className="w-3 h-3" />
+                                          <span>{isEditingInline ? 'Cerrar' : 'Editar Tiempo'}</span>
+                                        </button>
+                                      )}
+                                      {onEditService && (
+                                        <button
+                                          type="button"
+                                          onClick={() => onEditService(svc.rawService)}
+                                          className="p-1 hover:bg-[#FFB566]/20 text-slate-600 hover:text-[#0B1D4A] rounded-lg transition-colors cursor-pointer"
+                                          title="Abrir editor completo del servicio"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
                                     </div>
-                                  ) : (
-                                    <span className="text-[#0B1D4A]">${svc.subtotal.toFixed(2)}</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-center whitespace-nowrap">
-                                  {isCancelled ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold">
-                                      <Ban className="w-3 h-3 text-rose-600" /> Cancelado
-                                    </span>
-                                  ) : isPaidPrev ? (
-                                    <span
-                                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300"
-                                      title={svc.paidRecord?.periodLabel ? `Liquidado en: ${svc.paidRecord.periodLabel}` : 'Liquidado en nómina previa'}
-                                    >
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                      <span>Ya Pagado</span>
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
-                                      <Clock className="w-3 h-3 text-amber-600" /> Pendiente
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-center no-print whitespace-nowrap">
-                                  {onEditService ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => onEditService(svc.rawService)}
-                                      className="p-1 hover:bg-[#FFB566]/20 text-slate-600 hover:text-[#0B1D4A] rounded-lg transition-colors"
-                                      title="Editar monto o turno en el servicio original"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  ) : (
-                                    <span className="text-slate-300">—</span>
-                                  )}
-                                </td>
-                              </tr>
+                                  </td>
+                                </tr>
+
+                                {/* INLINE TIME & PAY EDITOR ROW */}
+                                {isEditingInline && !isCancelled && (
+                                  <tr className="bg-[#FAF7F1] border-b border-amber-300 no-print">
+                                    <td colSpan={9} className="p-3.5">
+                                      <div className="flex flex-wrap items-end justify-between gap-3 bg-white p-3.5 rounded-2xl border border-[#FFB566] shadow-xs">
+                                        <div>
+                                          <span className="text-[10px] uppercase tracking-wider font-extrabold text-[#0B1D4A] block">
+                                            ⏱️ Edición Directa de Tiempos y Pago en Nómina · {svc.unidad} ({svc.fecha})
+                                          </span>
+                                          <span className="text-[11px] text-slate-500">
+                                            Cambia las horas/minutos, la hora de entrada/salida o el pago base y se actualizará en Nómina y Servicios al instante.
+                                          </span>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-end gap-2.5">
+                                          {/* Entrada */}
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                                              Entrada (Check-In)
+                                            </label>
+                                            <input
+                                              type="time"
+                                              value={inlineEditDraft.clockIn}
+                                              onChange={(e) => {
+                                                const v = e.target.value;
+                                                setInlineEditDraft((prev) => {
+                                                  const next = { ...prev, clockIn: v };
+                                                  if (v && prev.clockOut) {
+                                                    const [h1, m1] = v.split(':').map(Number);
+                                                    const [h2, m2] = prev.clockOut.split(':').map(Number);
+                                                    let diff = h2 * 60 + m2 - (h1 * 60 + m1);
+                                                    if (diff < 0) diff += 24 * 60;
+                                                    if (diff > 0) {
+                                                      next.horasEnteras = Math.floor(diff / 60);
+                                                      next.minutos = diff % 60;
+                                                      const dec = parseFloat((next.horasEnteras + next.minutos / 60).toFixed(2));
+                                                      next.pagoBase = parseFloat(((Number(prev.rate) || 20) * dec).toFixed(2));
+                                                    }
+                                                  }
+                                                  return next;
+                                                });
+                                              }}
+                                              className="px-2 py-1 text-xs border border-slate-300 rounded-lg font-bold text-[#0B1D4A]"
+                                            />
+                                          </div>
+
+                                          {/* Salida */}
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                                              Salida (Check-Out)
+                                            </label>
+                                            <input
+                                              type="time"
+                                              value={inlineEditDraft.clockOut}
+                                              onChange={(e) => {
+                                                const v = e.target.value;
+                                                setInlineEditDraft((prev) => {
+                                                  const next = { ...prev, clockOut: v };
+                                                  if (prev.clockIn && v) {
+                                                    const [h1, m1] = prev.clockIn.split(':').map(Number);
+                                                    const [h2, m2] = v.split(':').map(Number);
+                                                    let diff = h2 * 60 + m2 - (h1 * 60 + m1);
+                                                    if (diff < 0) diff += 24 * 60;
+                                                    if (diff > 0) {
+                                                      next.horasEnteras = Math.floor(diff / 60);
+                                                      next.minutos = diff % 60;
+                                                      const dec = parseFloat((next.horasEnteras + next.minutos / 60).toFixed(2));
+                                                      next.pagoBase = parseFloat(((Number(prev.rate) || 20) * dec).toFixed(2));
+                                                    }
+                                                  }
+                                                  return next;
+                                                });
+                                              }}
+                                              className="px-2 py-1 text-xs border border-slate-300 rounded-lg font-bold text-[#0B1D4A]"
+                                            />
+                                          </div>
+
+                                          {/* Horas */}
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                                              Horas
+                                            </label>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="24"
+                                              value={inlineEditDraft.horasEnteras}
+                                              onChange={(e) => {
+                                                const hVal = Math.max(0, parseInt(e.target.value, 10) || 0);
+                                                setInlineEditDraft((prev) => {
+                                                  const dec = parseFloat((hVal + (Number(prev.minutos) || 0) / 60).toFixed(2));
+                                                  return {
+                                                    ...prev,
+                                                    horasEnteras: hVal,
+                                                    pagoBase: parseFloat(((Number(prev.rate) || 20) * dec).toFixed(2)),
+                                                  };
+                                                });
+                                              }}
+                                              className="w-14 px-2 py-1 text-xs border border-slate-300 rounded-lg font-bold text-center text-[#0B1D4A]"
+                                            />
+                                          </div>
+
+                                          {/* Minutos (0..59) */}
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                                              Minutos (0–59)
+                                            </label>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="59"
+                                              value={inlineEditDraft.minutos}
+                                              onChange={(e) => {
+                                                const mVal = Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0));
+                                                setInlineEditDraft((prev) => {
+                                                  const dec = parseFloat(((Number(prev.horasEnteras) || 0) + mVal / 60).toFixed(2));
+                                                  return {
+                                                    ...prev,
+                                                    minutos: mVal,
+                                                    pagoBase: parseFloat(((Number(prev.rate) || 20) * dec).toFixed(2)),
+                                                  };
+                                                });
+                                              }}
+                                              className="w-16 px-2 py-1 text-xs border border-slate-300 rounded-lg font-bold text-center text-[#0B1D4A]"
+                                            />
+                                          </div>
+
+                                          {/* Tarifa $/hr */}
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                                              Tarifa $/hr
+                                            </label>
+                                            <input
+                                              type="number"
+                                              step="0.25"
+                                              value={inlineEditDraft.rate}
+                                              onChange={(e) => {
+                                                const rVal = parseFloat(e.target.value) || 0;
+                                                setInlineEditDraft((prev) => {
+                                                  const dec = parseFloat(
+                                                    ((Number(prev.horasEnteras) || 0) + (Number(prev.minutos) || 0) / 60).toFixed(2)
+                                                  );
+                                                  return {
+                                                    ...prev,
+                                                    rate: rVal,
+                                                    pagoBase: parseFloat((rVal * dec).toFixed(2)),
+                                                  };
+                                                });
+                                              }}
+                                              className="w-16 px-2 py-1 text-xs border border-indigo-200 bg-indigo-50/40 rounded-lg font-bold text-right text-indigo-900"
+                                            />
+                                          </div>
+
+                                          {/* Pago Base $ CAD */}
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                                              Pago Turno ($ CAD)
+                                            </label>
+                                            <input
+                                              type="number"
+                                              step="0.25"
+                                              value={inlineEditDraft.pagoBase}
+                                              onChange={(e) =>
+                                                setInlineEditDraft((prev) => ({
+                                                  ...prev,
+                                                  pagoBase: parseFloat(e.target.value) || 0,
+                                                }))
+                                              }
+                                              className="w-20 px-2 py-1 text-xs border border-emerald-300 bg-emerald-50/40 rounded-lg font-extrabold text-right text-emerald-900"
+                                            />
+                                          </div>
+
+                                          {/* Save Button */}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              handleQuickUpdateServiceTime(
+                                                svc.rawService,
+                                                activeCleanerData.cleaner,
+                                                inlineEditDraft.horasEnteras,
+                                                inlineEditDraft.minutos,
+                                                inlineEditDraft.clockIn,
+                                                inlineEditDraft.clockOut,
+                                                inlineEditDraft.rate,
+                                                inlineEditDraft.pagoBase
+                                              );
+                                              setInlineEditId(null);
+                                            }}
+                                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                                          >
+                                            ✓ Guardar en Nómina
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
                             );
                           })}
                         </tbody>
@@ -2855,30 +3298,129 @@ export default function PayrollView({
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleConfirmPayment} className="p-6 space-y-4">
-              
-              {/* Payment Summary Box */}
-              <div className="bg-[#FFF8EC] border border-[#FFB566]/60 rounded-2xl p-4 flex items-center justify-between">
-                <div>
-                  <span className="text-[11px] uppercase tracking-wider text-amber-900 font-bold block">
-                    {payModalTarget.alreadyPaidCount > 0 ? 'Monto Neto a Dispersar (Pendiente)' : `Monto Total a Pagar (${payModalTarget.periodType})`}
-                  </span>
-                  <span className="text-3xl font-serif font-bold text-[#0B1D4A] tabular-nums mt-0.5 block">
-                    ${payModalTarget.amount.toFixed(2)} CAD
-                  </span>
-                  <span className="text-xs text-amber-800 mt-0.5 block">
-                    {payModalTarget.hours.toFixed(1)} hrs en {payModalTarget.servicesCount} turnos pendientes
-                  </span>
-                </div>
+            <form onSubmit={handleConfirmPayment} className="p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+              {(() => {
+                const liveModalRow = cleanerStatsMap[payModalTarget.cleaner];
+                const liveAmount = liveModalRow ? liveModalRow.pendingPay : payModalTarget.amount;
+                const liveHours = liveModalRow ? liveModalRow.pendingHours : payModalTarget.hours;
+                const liveServicesList =
+                  liveModalRow?.pendingServicesList && liveModalRow.pendingServicesList.length > 0
+                    ? liveModalRow.pendingServicesList
+                    : payModalTarget.servicesToPay || [];
 
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-400 block font-medium">Estado resultante:</span>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mt-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Pagado</span>
-                  </span>
-                </div>
-              </div>
+                return (
+                  <>
+                    {/* Payment Summary Box */}
+                    <div className="bg-[#FFF8EC] border border-[#FFB566]/60 rounded-2xl p-4 flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] uppercase tracking-wider text-amber-900 font-bold block">
+                          {payModalTarget.alreadyPaidCount > 0
+                            ? 'Monto Neto a Dispersar (Pendiente)'
+                            : `Monto Total a Pagar (${payModalTarget.periodType})`}
+                        </span>
+                        <span className="text-3xl font-serif font-bold text-[#0B1D4A] tabular-nums mt-0.5 block">
+                          ${liveAmount.toFixed(2)} CAD
+                        </span>
+                        <span className="text-xs text-amber-800 mt-0.5 block">
+                          {liveHours.toFixed(2)} hrs ({formatHoursAndMinutes(liveHours)}) en{' '}
+                          {liveServicesList.length} turnos pendientes
+                        </span>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 block font-medium">
+                          Estado resultante:
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mt-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Pagado</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Direct Shift Time & Pay Editor right at the moment of paying Payroll */}
+                    {onUpdateService && liveServicesList.length > 0 && (
+                      <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-[#0B1D4A] flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-[#FFB566]" />
+                            <span>Ajustar Tiempos / Horas de Turnos Antes de Pagar:</span>
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            Se recalcula en vivo
+                          </span>
+                        </div>
+
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                          {liveServicesList.map((sItem) => {
+                            const { h: sH, m: sM } = splitExactHoursAndMins(sItem.horas);
+                            return (
+                              <div
+                                key={sItem.id}
+                                className="p-2.5 bg-white rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs"
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-bold text-slate-900 truncate">
+                                    {sItem.fecha} · {sItem.unidad}
+                                  </div>
+                                  {(sItem.rawService?.clockIn || sItem.rawService?.clockOut) && (
+                                    <span className="text-[10px] text-emerald-700 font-semibold block">
+                                      ⏱️ Checador: {sItem.rawService.clockIn || '—'} → {sItem.rawService.clockOut || '—'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="24"
+                                      value={sH}
+                                      onChange={(e) =>
+                                        handleQuickUpdateServiceTime(
+                                          sItem.rawService,
+                                          payModalTarget.cleaner,
+                                          Math.max(0, parseInt(e.target.value, 10) || 0),
+                                          sM
+                                        )
+                                      }
+                                      className="w-10 text-xs font-bold text-[#0B1D4A] bg-white border border-slate-200 rounded px-1 py-0.5 text-center"
+                                      title="Horas"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">h</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="59"
+                                      value={sM}
+                                      onChange={(e) =>
+                                        handleQuickUpdateServiceTime(
+                                          sItem.rawService,
+                                          payModalTarget.cleaner,
+                                          sH,
+                                          Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0))
+                                        )
+                                      }
+                                      className="w-11 text-xs font-bold text-[#0B1D4A] bg-white border border-slate-200 rounded px-1 py-0.5 text-center"
+                                      title="Minutos exactos (0–59)"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">m</span>
+                                  </div>
+
+                                  <span className="font-extrabold text-[#0B1D4A] tabular-nums w-16 text-right">
+                                    ${sItem.subtotal.toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {/* Already Paid Exclusion Notice */}
               {payModalTarget.alreadyPaidCount > 0 && (

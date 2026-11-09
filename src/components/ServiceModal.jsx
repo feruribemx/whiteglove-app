@@ -21,6 +21,7 @@ export default function ServiceModal({
   onAddClient,
   onOpenAddCleaner,
   onOpenRatesConfig,
+  onOpenClientDossier,
   availableUnits = [],
   availableCleaners = [],
   rates,
@@ -45,13 +46,17 @@ export default function ServiceModal({
   const [selectedCleaners, setSelectedCleaners] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Duration: Hours & Minutes
+  // Duration: Hours & Minutes + Clock-In / Clock-Out times
   const [horasEnteras, setHorasEnteras] = useState(2);
   const [minutos, setMinutos] = useState(0);
+  const [clockIn, setClockIn] = useState('');
+  const [clockOut, setClockOut] = useState('');
 
   const [tipo, setTipo] = useState('Limpieza');
   const [status, setStatus] = useState('activo'); // 'activo' | 'cancelado'
   const [cobro, setCobro] = useState('');
+  const [cobranzaStatus, setCobranzaStatus] = useState('pendiente'); // 'pendiente' | 'facturado' | 'pagado'
+  const [metodoCobro, setMetodoCobro] = useState('E-Transfer');
   const [pagoCleaner, setPagoCleaner] = useState('');
   const [pagoCleaningTeam, setPagoCleaningTeam] = useState('');
   const [tip, setTip] = useState('');
@@ -82,17 +87,16 @@ export default function ServiceModal({
     return parseFloat((hours + mins / 60).toFixed(2));
   };
 
-  // Split decimal hours into whole hours and snapped minutes (0, 15, 20, 30, 45)
+  // Split decimal hours into whole hours and exact minutes (0..59) so clocked shifts never lose precision
   const splitDecimalHours = (decVal) => {
     const num = Math.max(0, Number(decVal) || 0);
-    const whole = Math.floor(num);
-    const rawMins = Math.round((num - whole) * 60);
-    const validMins = [0, 15, 20, 30, 45];
-    const snappedMin = validMins.reduce(
-      (prev, curr) => (Math.abs(curr - rawMins) < Math.abs(prev - rawMins) ? curr : prev),
-      0
-    );
-    return { h: whole, m: snappedMin };
+    let whole = Math.floor(num);
+    let rawMins = Math.round((num - whole) * 60);
+    if (rawMins >= 60) {
+      whole += 1;
+      rawMins = 0;
+    }
+    return { h: whole, m: Math.max(0, rawMins) };
   };
 
   // Default suggested pay rate calculation using Cleaner + Client rules
@@ -125,15 +129,17 @@ export default function ServiceModal({
 
       // Parse hours and minutes from decimal
       const totalH = Number(serviceToEdit.horas) || 2;
-      const whole = Math.floor(totalH);
-      const dec = totalH - whole;
-      const mins = Math.round(dec * 60);
+      const { h: whole, m: mins } = splitDecimalHours(totalH);
       setHorasEnteras(whole);
       setMinutos(mins);
+      setClockIn(serviceToEdit.clockIn || serviceToEdit.hora || '');
+      setClockOut(serviceToEdit.clockOut || '');
 
       setTipo(serviceToEdit.tipo || 'Limpieza');
       setStatus(serviceToEdit.status || 'activo');
       setCobro(serviceToEdit.cobro != null ? String(serviceToEdit.cobro) : '');
+      setCobranzaStatus(serviceToEdit.cobranzaStatus || 'pendiente');
+      setMetodoCobro(serviceToEdit.metodoCobro || 'E-Transfer');
       setPagoCleaner(serviceToEdit.pagoCleaner != null ? String(serviceToEdit.pagoCleaner) : '');
       setPagoCleaningTeam(serviceToEdit.pagoCleaningTeam != null ? String(serviceToEdit.pagoCleaningTeam) : '');
       setTip(serviceToEdit.tip != null ? String(serviceToEdit.tip) : '');
@@ -198,6 +204,8 @@ export default function ServiceModal({
       }
       setSelectedCleaners(targetCleaners);
       setStatus('activo');
+      setCobranzaStatus('pendiente');
+      setMetodoCobro('E-Transfer');
       setTip(prefill?.tip != null ? String(prefill.tip) : '');
       setCapturista(currentUser?.displayName || currentUser?.username || loggedCleanerName || 'WhiteGlove');
 
@@ -219,6 +227,8 @@ export default function ServiceModal({
       }
       setHorasEnteras(initialWhole);
       setMinutos(initialMins);
+      setClockIn(prefill?.clockIn || prefill?.hora || '');
+      setClockOut(prefill?.clockOut || '');
       const initDecimalHours = computeDecimalHours(initialWhole, initialMins) || 2;
 
       let resolvedCobroStr = '';
@@ -605,6 +615,9 @@ export default function ServiceModal({
       ...(isRealEdit ? serviceToEdit : {}),
       id: targetId,
       fecha: finalFecha,
+      hora: clockIn || serviceToEdit?.hora || '09:00',
+      clockIn: clockIn || serviceToEdit?.clockIn || null,
+      clockOut: clockOut || serviceToEdit?.clockOut || null,
       unidad: finalUnidad,
       cleaners: finalCleaners,
       cleaner: finalCleaners[0],
@@ -613,6 +626,12 @@ export default function ServiceModal({
       tipo: tipo || 'Limpieza',
       status: status || 'activo',
       cobro: showFinancials && cobro !== '' ? (Number(cobro) || 0) : (serviceToEdit?.cobro != null ? Number(serviceToEdit.cobro) : null),
+      cobranzaStatus: showFinancials ? (cobranzaStatus || 'pendiente') : (serviceToEdit?.cobranzaStatus || 'pendiente'),
+      metodoCobro: showFinancials ? (metodoCobro || 'E-Transfer') : (serviceToEdit?.metodoCobro || 'E-Transfer'),
+      fechaCobro:
+        showFinancials && cobranzaStatus === 'pagado'
+          ? (serviceToEdit?.fechaCobro || new Date().toISOString().split('T')[0])
+          : null,
       pagoCleaner: canEditPay && pagoCleaner !== '' ? (Number(pagoCleaner) || 0) : totalCleanersPay,
       pagosPorCleaner: Object.keys(safePagos).length ? safePagos : null,
       ratesPorCleaner: Object.keys(safeRates).length ? safeRates : null,
@@ -800,9 +819,19 @@ export default function ServiceModal({
 
           {/* Unit / Client */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1.5">
               <label className="block text-xs font-bold text-slate-700">Unidad / Cliente</label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {onOpenClientDossier && unidad && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenClientDossier(unidad)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold text-[#0B1D4A] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-all cursor-pointer"
+                    title="Abrir Ficha Técnica de esta propiedad (dirección, acceso, parking, notas)"
+                  >
+                    <span>📋 Ficha Técnica</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsCustomUnit(!isCustomUnit)}
@@ -970,49 +999,106 @@ export default function ServiceModal({
             )}
           </div>
 
-          {/* DURATION WITH HOURS & MINUTES (15, 20, 30, 45 MIN) */}
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
-            <div className="flex items-center justify-between">
+          {/* DURATION WITH EXACT HOURS & MINUTES (0-59 MIN) + CHECK-IN / CHECK-OUT */}
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <label className="block text-xs font-bold text-slate-700">
-                Duración del Turno (Horas y Minutos)
+                Duración del Turno y Reloj Checador (Horas y Minutos Exactos)
               </label>
               <span className="text-xs font-bold text-[#0B1D4A] bg-white px-2.5 py-1 rounded-lg border border-slate-200">
-                {horasEnteras}h {minutos > 0 ? `${minutos}m` : ''} ({totalDecimalHours} hrs)
+                {horasEnteras}h {minutos > 0 ? `${minutos}m` : '0m'} ({totalDecimalHours} hrs)
               </span>
             </div>
 
-            {/* Inputs for Hours and Minutes */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Optional Check-In & Check-Out Time Inputs (Syncs with Duration) */}
+            <div className="grid grid-cols-2 gap-3 p-2.5 bg-white rounded-xl border border-slate-200">
               <div>
-                <span className="text-[11px] text-slate-500 font-semibold block mb-1">Horas completas:</span>
-                <select
-                  value={horasEnteras}
-                  onChange={(e) => handleDurationChange(Number(e.target.value), minutos)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-bold"
-                >
-                  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((h) => (
-                    <option key={h} value={h}>{h} {h === 1 ? 'hora' : 'horas'}</option>
-                  ))}
-                </select>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-1">
+                  Hora Entrada (Check-In):
+                </span>
+                <input
+                  type="time"
+                  value={clockIn}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setClockIn(val);
+                    if (val && clockOut) {
+                      const [h1, m1] = val.split(':').map(Number);
+                      const [h2, m2] = clockOut.split(':').map(Number);
+                      let diffMins = (h2 * 60 + m2) - (h1 * 60 + m1);
+                      if (diffMins < 0) diffMins += 24 * 60;
+                      if (diffMins > 0) {
+                        handleDurationChange(Math.floor(diffMins / 60), diffMins % 60);
+                      }
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg font-bold text-[#0B1D4A]"
+                />
               </div>
-
               <div>
-                <span className="text-[11px] text-slate-500 font-semibold block mb-1">Minutos adicionales:</span>
-                <select
-                  value={minutos}
-                  onChange={(e) => handleDurationChange(horasEnteras, Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-bold"
-                >
-                  <option value={0}>0 min</option>
-                  <option value={15}>15 min (+0.25h)</option>
-                  <option value={20}>20 min (+0.33h)</option>
-                  <option value={30}>30 min (+0.50h)</option>
-                  <option value={45}>45 min (+0.75h)</option>
-                </select>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-1">
+                  Hora Salida (Check-Out):
+                </span>
+                <input
+                  type="time"
+                  value={clockOut}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setClockOut(val);
+                    if (clockIn && val) {
+                      const [h1, m1] = clockIn.split(':').map(Number);
+                      const [h2, m2] = val.split(':').map(Number);
+                      let diffMins = (h2 * 60 + m2) - (h1 * 60 + m1);
+                      if (diffMins < 0) diffMins += 24 * 60;
+                      if (diffMins > 0) {
+                        handleDurationChange(Math.floor(diffMins / 60), diffMins % 60);
+                      }
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg font-bold text-[#0B1D4A]"
+                />
               </div>
             </div>
 
-            {/* Quick preset buttons including 15, 20, 45 mins */}
+            {/* Inputs for Hours and Exact Minutes (0 to 59) */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="text-[11px] text-slate-500 font-semibold block mb-1">Horas completas:</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    max="24"
+                    value={horasEnteras}
+                    onChange={(e) => handleDurationChange(Math.max(0, parseInt(e.target.value, 10) || 0), minutos)}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-bold text-[#0B1D4A]"
+                  />
+                  <span className="text-xs font-bold text-slate-600">hrs</span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[11px] text-slate-500 font-semibold block mb-1">Minutos exactos (0–59):</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={minutos}
+                    onChange={(e) =>
+                      handleDurationChange(
+                        horasEnteras,
+                        Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0))
+                      )
+                    }
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-bold text-[#0B1D4A]"
+                  />
+                  <span className="text-xs font-bold text-slate-600">min</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick preset buttons including 15, 20, 30, 45 mins */}
             <div className="pt-1">
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1.5">
                 Atajos Rápidos:
@@ -1020,18 +1106,18 @@ export default function ServiceModal({
               <div className="flex flex-wrap gap-1.5">
                 {[
                   { label: '45m', h: 0, m: 45 },
+                  { label: '1h', h: 1, m: 0 },
                   { label: '1h 15m', h: 1, m: 15 },
-                  { label: '1h 20m', h: 1, m: 20 },
                   { label: '1h 30m', h: 1, m: 30 },
                   { label: '1h 45m', h: 1, m: 45 },
                   { label: '2h', h: 2, m: 0 },
                   { label: '2h 15m', h: 2, m: 15 },
-                  { label: '2h 20m', h: 2, m: 20 },
                   { label: '2h 30m', h: 2, m: 30 },
                   { label: '2h 45m', h: 2, m: 45 },
                   { label: '3h', h: 3, m: 0 },
                   { label: '3h 30m', h: 3, m: 30 },
                   { label: '4h', h: 4, m: 0 },
+                  { label: '5h', h: 5, m: 0 },
                 ].map((preset) => {
                   const isCurrent = horasEnteras === preset.h && minutos === preset.m;
                   return (
@@ -1109,39 +1195,42 @@ export default function ServiceModal({
                           </div>
                         </div>
 
-                        {/* Individual Hours & Minutes Dropdowns */}
+                        {/* Individual Hours & Exact Minutes Inputs */}
                         <div className="flex items-center gap-1.5">
-                          <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+                          <div className="flex items-center gap-1 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
                             <Clock className="w-3.5 h-3.5 text-[#0B1D4A]" />
-                            <select
+                            <input
+                              type="number"
+                              min="0"
+                              max="24"
                               value={clWholeH}
                               onChange={(e) =>
-                                handleCleanerIndividualDuration(cl, Number(e.target.value), clMins)
+                                handleCleanerIndividualDuration(
+                                  cl,
+                                  Math.max(0, parseInt(e.target.value, 10) || 0),
+                                  clMins
+                                )
                               }
-                              className="text-xs font-bold text-[#0B1D4A] bg-transparent focus:outline-none cursor-pointer"
+                              className="w-11 text-xs font-bold text-[#0B1D4A] bg-white border border-slate-200 rounded px-1 py-0.5 text-center focus:outline-none"
                               title={`Horas trabajadas por ${cl}`}
-                            >
-                              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((hOpt) => (
-                                <option key={hOpt} value={hOpt}>
-                                  {hOpt} {hOpt === 1 ? 'hr' : 'hrs'}
-                                </option>
-                              ))}
-                            </select>
-                            <span className="text-slate-300">|</span>
-                            <select
+                            />
+                            <span className="text-[11px] font-bold text-slate-500">h</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="59"
                               value={clMins}
                               onChange={(e) =>
-                                handleCleanerIndividualDuration(cl, clWholeH, Number(e.target.value))
+                                handleCleanerIndividualDuration(
+                                  cl,
+                                  clWholeH,
+                                  Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0))
+                                )
                               }
-                              className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none cursor-pointer"
-                              title={`Minutos adicionales trabajados por ${cl}`}
-                            >
-                              <option value={0}>0 min</option>
-                              <option value={15}>15 min</option>
-                              <option value={20}>20 min</option>
-                              <option value={30}>30 min</option>
-                              <option value={45}>45 min</option>
-                            </select>
+                              className="w-11 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded px-1 py-0.5 text-center focus:outline-none"
+                              title={`Minutos exactos trabajados por ${cl} (0–59)`}
+                            />
+                            <span className="text-[11px] font-bold text-slate-500">m</span>
                           </div>
                         </div>
                       </div>
@@ -1203,6 +1292,56 @@ export default function ServiceModal({
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Client Billing & Cobranza Status (Strictly for Master Admins) */}
+          {showFinancials && (
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <span className="text-xs font-bold text-[#0B1D4A] block">
+                    Estado de Cobranza al Cliente
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Control de cuentas por cobrar y pagos liquidados por el cliente
+                  </span>
+                </div>
+
+                {cobranzaStatus === 'pagado' && (
+                  <select
+                    value={metodoCobro}
+                    onChange={(e) => setMetodoCobro(e.target.value)}
+                    className="px-2.5 py-1 text-xs font-bold bg-white border border-emerald-300 text-emerald-900 rounded-xl focus:outline-none cursor-pointer"
+                  >
+                    <option value="E-Transfer">E-Transfer</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Tarjeta / Stripe">Tarjeta / Stripe</option>
+                    <option value="Efectivo">Efectivo</option>
+                  </select>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'pendiente', label: '⏳ Por Cobrar', activeClass: 'bg-amber-600 text-white border-amber-600' },
+                  { id: 'facturado', label: '🧾 Facturado', activeClass: 'bg-sky-700 text-white border-sky-700' },
+                  { id: 'pagado', label: '✅ Cobrado / Pagado', activeClass: 'bg-emerald-600 text-white border-emerald-600' },
+                ].map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setCobranzaStatus(st.id)}
+                    className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      cobranzaStatus === st.id
+                        ? `${st.activeClass} shadow-xs`
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
               </div>
             </div>
           )}

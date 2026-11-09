@@ -1,3 +1,5 @@
 [install]
-networkConcurrency = 4
-concurrentScripts = 4
+concurrentScripts = 2
+
+[install.cache]
+dir = "/app/applet/.bun-cache"

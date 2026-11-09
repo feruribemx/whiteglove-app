@@ -35,14 +35,17 @@ export default function ServicesList({
   onEditService,
   onDeleteService,
   onCancelService,
+  onToggleCobranza,
   onOpenNewService,
   onOpenAddCleaner,
   onOpenRatesConfig,
+  onOpenClientDossier,
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [cleanerFilter, setCleanerFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'activo' | 'cancelado'
+  const [cobranzaFilter, setCobranzaFilter] = useState('all'); // 'all' | 'pendiente' | 'facturado' | 'pagado'
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showGlossaryModal, setShowGlossaryModal] = useState(false);
@@ -154,6 +157,11 @@ export default function ServicesList({
       if (statusFilter === 'activo' && isSvcCancelled) return false;
     }
 
+    if (showFinancials && cobranzaFilter !== 'all') {
+      const cStatus = s.cobranzaStatus || 'pendiente';
+      if (cStatus !== cobranzaFilter) return false;
+    }
+
     if (cleanerFilter !== 'all') {
       const cFilterLow = cleanerFilter.toLowerCase();
       if (cFilterLow === 'mafer') {
@@ -261,6 +269,20 @@ export default function ServicesList({
     if (s.status === 'cancelado') return sum;
     return sum + (Number(s.cobro) || 0);
   }, 0);
+  const totalCobrado = filteredServices.reduce((sum, s) => {
+    if (s.status === 'cancelado') return sum;
+    if ((s.cobranzaStatus || 'pendiente') === 'pagado') {
+      return sum + (Number(s.cobro) || 0);
+    }
+    return sum;
+  }, 0);
+  const totalPorCobrar = filteredServices.reduce((sum, s) => {
+    if (s.status === 'cancelado') return sum;
+    if ((s.cobranzaStatus || 'pendiente') !== 'pagado') {
+      return sum + (Number(s.cobro) || 0);
+    }
+    return sum;
+  }, 0);
   const totalCleanerPay = filteredServices.reduce((sum, s) => {
     if (s.status === 'cancelado') return sum;
     if (s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).length > 0) {
@@ -349,10 +371,37 @@ export default function ServicesList({
               ))}
             </select>
           )}
+
+          {/* Cobranza Filter (Master Admins only) */}
+          {showFinancials && (
+            <select
+              value={cobranzaFilter}
+              onChange={(e) => setCobranzaFilter(e.target.value)}
+              className="px-2.5 py-1.5 text-xs border border-emerald-300 rounded-xl bg-emerald-50/60 font-bold text-emerald-950 focus:outline-none focus:ring-2 focus:ring-[#0B1D4A]"
+              title="Filtrar servicios por estado de cobranza al cliente"
+            >
+              <option value="all">Cobranza: Todos</option>
+              <option value="pendiente">⏳ Por Cobrar (Pendientes)</option>
+              <option value="facturado">🧾 Facturados / Enviados</option>
+              <option value="pagado">✅ Cobrados / Pagados</option>
+            </select>
+          )}
         </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 flex-wrap">
+          {onOpenClientDossier && (
+            <button
+              type="button"
+              onClick={() => onOpenClientDossier('')}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-[#0B1D4A] border border-sky-300/80 text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer"
+              title="Abrir Fichas Técnicas de Clientes (direcciones, códigos de acceso, Wi-Fi e instrucciones)"
+            >
+              <Building2 className="w-3.5 h-3.5 text-sky-700" />
+              <span>Fichas Técnicas</span>
+            </button>
+          )}
+
           {showFinancials && onOpenRatesConfig && (
             <button
               type="button"
@@ -537,7 +586,7 @@ export default function ServicesList({
       {/* Financial Summary Bar (Clean, without displaying raw internal formulas publicly) */}
       {showFinancials && (
         <div className="bg-[#0B1D4A] text-white p-3.5 rounded-2xl border border-[#1E3670] shadow-xs flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-300 font-semibold uppercase tracking-wider">
               Resumen Financiero del Filtro ({filteredServices.length} servicios)
             </span>
@@ -550,11 +599,31 @@ export default function ServicesList({
               <BookOpen className="w-3 h-3" />
               <span>Glosario de Fórmulas</span>
             </button>
+            {onToggleCobranza && totalPorCobrar > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const pendingIds = filteredServices
+                    .filter((s) => s.status !== 'cancelado' && (s.cobranzaStatus || 'pendiente') !== 'pagado')
+                    .map((s) => s.id);
+                  if (pendingIds.length > 0) {
+                    onToggleCobranza(pendingIds, 'pagado');
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[11px] font-bold border border-emerald-400/40 transition-colors cursor-pointer"
+                title="Marcar todos los servicios visibles en este filtro como Cobrados / Pagados"
+              >
+                <CheckCircle2 className="w-3 h-3" />
+                <span>Marcar filtrados como Cobrados</span>
+              </button>
+            )}
           </div>
-          <div className="flex items-center gap-4 text-xs font-semibold text-slate-300 flex-wrap">
-            <span>Cobro: <strong className="text-white">${totalCobro.toFixed(2)}</strong></span>
+          <div className="flex items-center gap-4 text-xs font-semibold text-slate-300 flex-wrap tabular-nums">
+            <span>Facturación: <strong className="text-white">${totalCobro.toFixed(2)}</strong></span>
+            <span>Cobrado: <strong className="text-emerald-300">${totalCobrado.toFixed(2)}</strong></span>
+            <span>Por Cobrar: <strong className="text-amber-300">${totalPorCobrar.toFixed(2)}</strong></span>
             <span>Pago Teams: <strong className="text-sky-300">${totalTeamPay.toFixed(2)}</strong></span>
-            <span>Pago Cleaners: <strong className="text-amber-300">${totalCleanerPay.toFixed(2)}</strong></span>
+            <span>Pago Cleaners: <strong className="text-amber-200">${totalCleanerPay.toFixed(2)}</strong></span>
             <span>Utilidad Neta: <strong className="text-[#FFB566] font-bold">${totalNetProfit.toFixed(2)}</strong></span>
           </div>
         </div>
@@ -571,6 +640,7 @@ export default function ServicesList({
                 <th className="px-4 py-3">Cleaners</th>
                 <th className="px-4 py-3 text-center">Duración</th>
                 {showFinancials && <th className="px-4 py-3 text-right">Cobro Cliente</th>}
+                {showFinancials && <th className="px-4 py-3 text-center">Cobranza Cliente</th>}
                 <th className="px-4 py-3 text-right">Pago Cleaner</th>
                 {showFinancials && <th className="px-4 py-3 text-right text-sky-900 bg-sky-50/60 font-bold">Pago Team</th>}
                 {showFinancials && <th className="px-4 py-3 text-right text-emerald-900 bg-emerald-50/60 font-bold">Utilidad Neta</th>}
@@ -628,6 +698,19 @@ export default function ServicesList({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <span className={isCancelled ? 'line-through text-slate-400' : ''}>{svc.unidad}</span>
+                        {onOpenClientDossier && svc.unidad && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenClientDossier(svc.unidad);
+                            }}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-[#0B1D4A] border border-amber-300/80 transition-colors cursor-pointer"
+                            title={`Ver Ficha Técnica de ${svc.unidad} (dirección, acceso, Wi-Fi, notas)`}
+                          >
+                            <span>📋 Ficha</span>
+                          </button>
+                        )}
                         {clientServiceCounts[svc.unidad?.trim()] > 1 && !isCancelled && (
                           <span
                             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-800 border border-sky-200 shadow-2xs"
@@ -669,7 +752,7 @@ export default function ServicesList({
                       </div>
                     </td>
 
-                    {/* Duración (Horas y Minutos) */}
+                    {/* Duración (Horas y Minutos + Reloj Checador) */}
                     <td className="px-4 py-3 text-center tabular-nums whitespace-nowrap">
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${
                         isCancelled ? 'bg-slate-100 text-slate-400' : 'bg-slate-100 text-[#0B1D4A]'
@@ -677,6 +760,14 @@ export default function ServicesList({
                         <Clock className="w-3 h-3 text-slate-400" />
                         <span>{formattedDuration}</span>
                       </span>
+                      {(svc.clockIn || svc.clockOut) && (
+                        <span
+                          className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md block mt-1"
+                          title="Horario registrado en Reloj Checador (Entrada → Salida)"
+                        >
+                          ⏱️ {svc.clockIn || '—'} → {svc.clockOut || '—'}
+                        </span>
+                      )}
                       {cleaners.length > 1 && svc.horasPorCleaner && Object.keys(svc.horasPorCleaner).length > 1 ? (
                         <span className="text-[10px] text-slate-500 font-semibold block mt-0.5">
                           {cleaners
@@ -696,6 +787,52 @@ export default function ServicesList({
                     {showFinancials && (
                       <td className={`px-4 py-3 text-right tabular-nums font-bold ${isCancelled ? 'text-slate-400 line-through' : 'text-emerald-800'}`}>
                         {cobro != null ? `$${cobro.toFixed(2)}` : '—'}
+                      </td>
+                    )}
+
+                    {/* Cobranza Cliente (Interactive 1-Click Status Toggle for Admins) */}
+                    {showFinancials && (
+                      <td className="px-3 py-3 text-center whitespace-nowrap">
+                        {isCancelled ? (
+                          <span className="text-slate-400 text-[10px]">—</span>
+                        ) : (
+                          (() => {
+                            const cStat = svc.cobranzaStatus || 'pendiente';
+                            const nextStat =
+                              cStat === 'pendiente'
+                                ? 'pagado'
+                                : cStat === 'pagado'
+                                ? 'facturado'
+                                : 'pendiente';
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (onToggleCobranza) {
+                                    onToggleCobranza(svc.id, nextStat);
+                                  }
+                                }}
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold border transition-all cursor-pointer ${
+                                  cStat === 'pagado'
+                                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200'
+                                    : cStat === 'facturado'
+                                    ? 'bg-sky-100 text-sky-900 border-sky-300 hover:bg-sky-200'
+                                    : 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                                }`}
+                                title="Clic para cambiar estado de cobranza (Por Cobrar → Cobrado → Facturado)"
+                              >
+                                <span>
+                                  {cStat === 'pagado'
+                                    ? '✅ Cobrado'
+                                    : cStat === 'facturado'
+                                    ? '🧾 Facturado'
+                                    : '⏳ Por Cobrar'}
+                                </span>
+                              </button>
+                            );
+                          })()
+                        )}
                       </td>
                     )}
 

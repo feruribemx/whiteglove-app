@@ -17,11 +17,49 @@ export default function LandingView({ onGoToLogin }) {
   // Interactive Service Showcase Tab (Prioritizing Deep Clean & Luxury Housekeeping)
   const [activeServiceTab, setActiveServiceTab] = useState('deepclean');
 
-  // Interactive Quote Calculator State (Luxury Residence & Deep Clean first; includes bathrooms)
+  // Interactive Quote Calculator State (Luxury Residence & Deep Clean first; includes bathrooms & currency)
   const [calcProperty, setCalcProperty] = useState('residence');
   const [calcBedrooms, setCalcBedrooms] = useState('3');
   const [calcBathrooms, setCalcBathrooms] = useState('2');
   const [calcType, setCalcType] = useState('deepclean');
+  const [currency, setCurrency] = useState('CAD'); // 'CAD' | 'USD' | 'MXN'
+
+  // Interactive FAQ Accordion State
+  const [openFaqIdx, setOpenFaqIdx] = useState(0);
+  const [faqCategory, setFaqCategory] = useState('all'); // 'all' | 'service' | 'security' | 'billing'
+
+  // Dynamic calculation of estimated hours, crew size, and reference price range in selected currency
+  const getEstimateDetails = () => {
+    const beds = calcBedrooms === '4+' ? 4 : Number(calcBedrooms) || 2;
+    const baths = calcBathrooms === '4+' ? 4 : Number(calcBathrooms) || 2;
+    const typeExtra = calcType === 'deepclean' || calcType === 'moveinout' ? 1.5 : 0;
+    const propExtra = calcProperty === 'residence' ? 0.5 : 0;
+    const minH = Math.max(2.5, 1.5 + beds * 0.5 + baths * 0.5 + typeExtra + propExtra);
+    const maxH = minH + 1;
+    const crew = beds >= 3 || calcType === 'moveinout' || calcType === 'deepclean' ? '2' : '1–2';
+
+    // Reference hourly billing rate per hub currency
+    let ratePerHour = 55; // CAD base
+    if (currency === 'USD') ratePerHour = 50;
+    if (currency === 'MXN') ratePerHour = 480;
+
+    const minPrice = Math.round((minH * ratePerHour) / 5) * 5;
+    const maxPrice = Math.round((maxH * ratePerHour) / 5) * 5;
+    const formattedPrice =
+      currency === 'MXN'
+        ? `$${minPrice.toLocaleString('en-US')} – $${maxPrice.toLocaleString('en-US')} MXN`
+        : `$${minPrice} – $${maxPrice} ${currency}`;
+
+    return {
+      minH,
+      maxH,
+      crew,
+      minPrice,
+      maxPrice,
+      formattedPrice,
+      currency,
+    };
+  };
 
   // Alternative Online Quote / Contact Form State (Propuesta #1 - Lead Capture)
   const [formName, setFormName] = useState('');
@@ -75,6 +113,8 @@ export default function LandingView({ onGoToLogin }) {
       : (calcType === 'turnover') ? (lang === 'en' ? 'Airbnb Turnover & Linen Reset' : 'Turnover Airbnb y Blancos')
       : (lang === 'en' ? 'Move-In / Move-Out transformation' : 'Mudanza y Entrega de Llaves');
 
+    const est = getEstimateDetails();
+
     const inquiryData = {
       folio: folioCode,
       name: formName.trim(),
@@ -86,6 +126,9 @@ export default function LandingView({ onGoToLogin }) {
       bedrooms: calcBedrooms,
       bathrooms: calcBathrooms,
       serviceType: serviceLabel,
+      currency: est.currency,
+      estimatedRange: est.formattedPrice,
+      estimatedHours: `${est.minH}–${est.maxH} hrs`,
       desiredDate: formDate || 'Flexible',
       notes: formNotes.trim(),
       contactPreference: formContactPref,
@@ -147,17 +190,18 @@ export default function LandingView({ onGoToLogin }) {
 
     const propertyText = (propLabels[lang] && propLabels[lang][calcProperty]) || calcProperty.toUpperCase();
     const serviceText = (typeLabels[lang] && typeLabels[lang][calcType]) || calcType.toUpperCase();
+    const est = getEstimateDetails();
 
     const addressPartEn = formAddress.trim() ? ` located at ${formAddress.trim()}` : '';
     const addressPartEs = formAddress.trim() ? ` ubicada en ${formAddress.trim()}` : '';
 
     if (lang === 'en') {
       return encodeURIComponent(
-        `Hi WhiteGlove! I would like to request an estimate for a ${propertyText} with ${calcBedrooms} bedroom(s) and ${calcBathrooms} bathroom(s) (${serviceText})${addressPartEn}.`
+        `Hi WhiteGlove! I would like to request an estimate in ${est.currency} (Ref: ${est.formattedPrice}, est. ${est.minH}–${est.maxH} hrs) for a ${propertyText} with ${calcBedrooms} bedroom(s) and ${calcBathrooms} bathroom(s) (${serviceText})${addressPartEn}.`
       );
     }
     return encodeURIComponent(
-      `¡Hola WhiteGlove! Me gustaría solicitar una cotización para ${propertyText} de ${calcBedrooms} recámara(s) y ${calcBathrooms} baño(s) (${serviceText})${addressPartEs}.`
+      `¡Hola WhiteGlove! Me gustaría solicitar una cotización en ${est.currency} (Ref: ${est.formattedPrice}, est. ${est.minH}–${est.maxH} hrs) para ${propertyText} de ${calcBedrooms} recámara(s) y ${calcBathrooms} baño(s) (${serviceText})${addressPartEs}.`
     );
   };
 
@@ -587,18 +631,40 @@ export default function LandingView({ onGoToLogin }) {
           </a>
 
           {/* Clean Nav Links (Strictly in active language) */}
-          <nav className="hidden lg:flex items-center gap-6 text-xs font-semibold uppercase tracking-wider text-slate-300">
+          <nav className="hidden lg:flex items-center gap-5 text-xs font-semibold uppercase tracking-wider text-slate-300">
             <a href="#services" className="hover:text-white transition-colors">{t.navServices}</a>
             <a href="#calculator" className="hover:text-white transition-colors">{t.navEstimate}</a>
             <a href="#comparison" className="hover:text-white transition-colors">{t.navStandard}</a>
             <a href="#areas" className="hover:text-white transition-colors">{t.navAreas}</a>
             <a href="#reviews" className="hover:text-white transition-colors">{t.navReviews}</a>
+            <a href="#faq" className="hover:text-white transition-colors">{lang === 'en' ? 'FAQ' : 'Preguntas'}</a>
             <a href="#contact" className="hover:text-white transition-colors">{t.navContact}</a>
           </nav>
 
-          {/* Action Zone: Language toggle + Portal Login button */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Action Zone: Currency Selector + Language toggle + Portal Login button */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             
+            {/* Multi-Currency Selector (CAD / USD / MXN) */}
+            <div
+              className="hidden sm:flex items-center bg-[#1E3670] p-0.5 rounded-lg text-[11px] font-bold border border-slate-700/60"
+              title={lang === 'en' ? 'Select preferred currency' : 'Seleccionar moneda de cotización'}
+            >
+              {['CAD', 'USD', 'MXN'].map((curr) => (
+                <button
+                  key={curr}
+                  type="button"
+                  onClick={() => setCurrency(curr)}
+                  className={`px-2 py-1 rounded-md transition-all cursor-pointer ${
+                    currency === curr
+                      ? 'bg-emerald-500 text-slate-950 font-extrabold shadow-xs'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {curr}
+                </button>
+              ))}
+            </div>
+
             {/* Bilingual Switcher */}
             <div className="flex items-center bg-[#1E3670] p-0.5 rounded-lg text-xs font-bold border border-slate-700/60">
               <button
@@ -945,6 +1011,44 @@ export default function LandingView({ onGoToLogin }) {
 
           <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xl space-y-6">
             
+            {/* Currency & Hub Selector Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-[#0B1D4A] block">
+                  {lang === 'en' ? 'Select Currency & Operational Hub' : 'Selecciona Moneda y Sede de Cotización'}
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  {lang === 'en'
+                    ? 'Switch between Canadian Dollars, US Dollars, or Mexican Pesos'
+                    : 'Cambia entre Dólares Canadienses (CAD), Dólares Americanos (USD) o Pesos Mexicanos (MXN)'}
+                </span>
+              </div>
+
+              <div className="inline-flex items-center bg-[#FBF9F5] p-1 rounded-xl border border-slate-200 gap-1 self-start sm:self-auto">
+                {[
+                  { id: 'CAD', label: '🇨🇦 CAD $ (Toronto / GTA)', cityDefault: 'Toronto & GTA' },
+                  { id: 'USD', label: '🇺🇸 USD $ (Seattle)', cityDefault: 'Seattle' },
+                  { id: 'MXN', label: '🇲🇽 MXN $ (Guadalajara)', cityDefault: 'Guadalajara' },
+                ].map((cOpt) => (
+                  <button
+                    key={cOpt.id}
+                    type="button"
+                    onClick={() => {
+                      setCurrency(cOpt.id);
+                      setFormCity(cOpt.cityDefault);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      currency === cOpt.id
+                        ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {cOpt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Step 1: Property Type */}
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
@@ -1073,8 +1177,8 @@ export default function LandingView({ onGoToLogin }) {
             </div>
 
             {/* Summary & WhatsApp Dispatch */}
-            <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#FBF9F5] p-5 rounded-2xl">
-              <div>
+            <div className="pt-4 border-t border-slate-200 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-[#FBF9F5] p-5 rounded-2xl">
+              <div className="space-y-1.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
                   {t.selectedScopeLabel}
                 </span>
@@ -1089,9 +1193,29 @@ export default function LandingView({ onGoToLogin }) {
                      (lang === 'en' ? 'Move-In/Out' : 'Mudanza')
                    }
                 </span>
-                <span className="text-xs text-emerald-700 font-semibold mt-0.5 block">
-                  {t.availableInHubs}
-                </span>
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  {(() => {
+                    const est = getEstimateDetails();
+                    return (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#0B1D4A] bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-lg tabular-nums shadow-2xs">
+                          <span>{lang === 'en' ? `Est. Range: ${est.formattedPrice}` : `Rango Est.: ${est.formattedPrice}`}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0B1D4A] bg-amber-100/80 border border-amber-300/80 px-2.5 py-1 rounded-lg tabular-nums">
+                          <Clock className="w-3.5 h-3.5 text-[#E89A45]" />
+                          <span>
+                            {lang === 'en'
+                              ? `Est. ${est.minH}–${est.maxH} hrs · ${est.crew} Specialists`
+                              : `Est. ${est.minH}–${est.maxH} hrs · ${est.crew} Especialistas`}
+                          </span>
+                        </span>
+                      </>
+                    );
+                  })()}
+                  <span className="text-xs text-emerald-700 font-semibold">
+                    {t.availableInHubs}
+                  </span>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
@@ -1342,8 +1466,154 @@ export default function LandingView({ onGoToLogin }) {
         </div>
       </section>
 
+      {/* 8.2 EXECUTIVE FREQUENTLY ASKED QUESTIONS (FAQ ACCORDION) */}
+      <section id="faq" className="py-20 bg-[#FBF9F5] border-b border-slate-200/80 scroll-mt-12">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
+          
+          <div className="text-center max-w-2xl mx-auto space-y-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-[#E89A45] block">
+              {lang === 'en' ? 'Clarity & Transparency' : 'Claridad y Confianza'}
+            </span>
+            <h2 className="font-serif text-3xl sm:text-4xl font-medium text-[#0B1D4A]">
+              {lang === 'en' ? 'Frequently Asked Questions' : 'Preguntas Frecuentes'}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+              {lang === 'en'
+                ? 'Everything you need to know about our equipment, security protocols, Airbnb logistics, and multi-currency billing.'
+                : 'Todo lo que necesitas saber sobre nuestro equipo e insumos, protocolos de seguridad, logística Airbnb y facturación.'}
+            </p>
+          </div>
+
+          {/* Category Filter Tabs */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {[
+              { id: 'all', label: lang === 'en' ? 'All Questions' : 'Todas las Preguntas' },
+              { id: 'service', label: lang === 'en' ? 'Equipment & Supplies' : 'Equipo e Insumos' },
+              { id: 'security', label: lang === 'en' ? 'Security & Airbnb' : 'Seguridad y Airbnb' },
+              { id: 'billing', label: lang === 'en' ? 'Rates & Currencies' : 'Tarifas y Monedas' },
+            ].map((cat) => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => {
+                  setFaqCategory(cat.id);
+                  setOpenFaqIdx(0);
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  faqCategory === cat.id
+                    ? 'bg-[#0B1D4A] text-[#FFB566] shadow-xs'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Accordion Cards */}
+          <div className="space-y-3">
+            {[
+              {
+                category: 'service',
+                q: lang === 'en'
+                  ? 'Do you bring your own HEPA equipment and eco-safe luxury cleaning supplies?'
+                  : '¿Llevan su propio equipo, aspiradoras HEPA e insumos de grado hotelero?',
+                a: lang === 'en'
+                  ? 'Yes. Every WhiteGlove specialist arrives fully equipped with hospital-grade HEPA filtration vacuums, color-coded microfiber systems (to prevent cross-contamination between bathrooms and kitchens), and non-toxic, pH-neutral formulas safe for natural marble, quartz, hardwood, and pets.'
+                  : 'Sí. Nuestro equipo llega completamente equipado con aspiradoras de filtración HEPA, paños de microfibra codificados por color (para evitar contaminación cruzada entre baños y cocina) y productos biodegradables de pH neutro seguros para mármol, cuarzo, maderas finas y mascotas.',
+              },
+              {
+                category: 'security',
+                q: lang === 'en'
+                  ? 'How do you vet your specialists and protect my residence or penthouse?'
+                  : '¿Cómo seleccionan a su personal y cómo protegen la seguridad de mi residencia?',
+                a: lang === 'en'
+                  ? 'Every specialist undergoes strict background verification, reference checks, and in-person certification under our 50-Point WhiteGlove Standard. We never use unvetted gig-workers, and for recurring clients we assign a consistent, dedicated team familiar with your property.'
+                  : 'Cada especialista pasa por verificación de antecedentes, validación de referencias y certificación práctica en nuestro estándar de 50 puntos. Nunca enviamos personal temporal sin certificar y, en clientes recurrentes, asignamos al mismo equipo de confianza.',
+              },
+              {
+                category: 'security',
+                q: lang === 'en'
+                  ? 'How do Smart Lock access, lockboxes, and Airbnb turnover windows work?'
+                  : '¿Cómo funciona el acceso con Smart Lock / Lockbox y la rotación para anfitriones de Airbnb?',
+                a: lang === 'en'
+                  ? 'We work seamlessly with August, Schlage, Yale Smart Locks, concierges, and lockboxes. Your property access codes and linen instructions are stored in an encrypted internal Technical Property Dossier accessible only to your assigned specialist and supervisor. Upon completion, we send photographic verification and restock alerts.'
+                  : 'Operamos con cerraduras inteligentes (Smart Locks), lockboxes y recepción/concierge. Los códigos e instrucciones de blancos se resguardan en una Ficha Técnica interna confidencial visible únicamente para tu especialista asignado y supervisión. Al terminar cada turnover, confirmamos con reporte visual y aviso de stock.',
+              },
+              {
+                category: 'service',
+                q: lang === 'en'
+                  ? 'What is the difference between Regular Luxury Housekeeping and a Deep Clean?'
+                  : '¿Cuál es la diferencia entre Housekeeping Residencial y un Deep Clean (Limpieza Profunda)?',
+                a: lang === 'en'
+                  ? 'Regular Housekeeping maintains pristine hotel-level order across kitchens, bathrooms, bedrooms, and floors on a weekly or bi-weekly schedule. A Deep Clean includes intensive detailing: baseboards, interior cabinets, oven/fridge detailing, limescale removal on glass showers, window tracks, and beneath furniture.'
+                  : 'El Housekeeping Residencial mantiene tu hogar impecable de forma semanal o quincenal (cocina, baños, pisos y tendido tipo hotel). El Deep Clean añade detallado intensivo: zoclos, interior de gabinetes, desengrasado profundo de campana/horno, desincrustación de canceles de baño y rieles de ventanales.',
+              },
+              {
+                category: 'billing',
+                q: lang === 'en'
+                  ? 'Which currencies and payment methods do you accept across Canada, USA, and Mexico?'
+                  : '¿En qué monedas operan y qué métodos de pago o facturación aceptan (CAD, USD, MXN)?',
+                a: lang === 'en'
+                  ? 'You can quote and settle in the local currency of each hub: CAD ($) in Toronto & GTA / Hamilton (Interac e-Transfer, credit card, or corporate transfer), USD ($) in Seattle, and MXN ($) in Guadalajara (SPEI transfer or card). You can toggle your preferred currency right in our Instant Estimator above.'
+                  : 'Cotizamos y facturamos en la moneda local de cada sede: CAD ($) en Toronto y Hamilton (Interac e-Transfer, tarjeta o transferencia), USD ($) en Seattle y MXN ($) en Guadalajara (transferencia SPEI o tarjeta). Puedes cambiar la moneda directamente en el Estimador Interactivo de arriba.',
+              },
+              {
+                category: 'billing',
+                q: lang === 'en'
+                  ? 'What is the WhiteGlove 100% Satisfaction Guarantee and rescheduling policy?'
+                  : '¿Cómo funciona la Garantía WhiteGlove 100% y la política de reprogramación?',
+                a: lang === 'en'
+                  ? 'If any detail of your service does not meet our 50-Point Standard, notify us within 24 hours and our team will return promptly to rectify it at zero additional cost. You can reschedule or adjust any appointment with 24 hours notice via WhatsApp without penalty.'
+                  : 'Si algún detalle no cumple con nuestro protocolo de 50 puntos, avísanos dentro de las primeras 24 horas y nuestro equipo regresará sin costo adicional para corregirlo. Puedes reprogramar tu cita con 24 horas de anticipación vía WhatsApp sin penalización.',
+              },
+            ]
+              .filter((item) => faqCategory === 'all' || item.category === faqCategory)
+              .map((faq, idx) => {
+                const isOpen = openFaqIdx === idx;
+                return (
+                  <div
+                    key={idx}
+                    className={`rounded-2xl border transition-all overflow-hidden ${
+                      isOpen
+                        ? 'bg-white border-[#0B1D4A] shadow-md'
+                        : 'bg-white/80 border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setOpenFaqIdx(isOpen ? -1 : idx)}
+                      className="w-full px-5 sm:px-6 py-4 text-left flex items-center justify-between gap-4 cursor-pointer"
+                    >
+                      <span className="font-serif font-bold text-sm sm:text-base text-[#0B1D4A]">
+                        {faq.q}
+                      </span>
+                      <span
+                        className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold transition-transform ${
+                          isOpen
+                            ? 'bg-[#0B1D4A] text-[#FFB566] rotate-90'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="px-5 sm:px-6 pb-5 pt-1 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-slate-100">
+                        {faq.a}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+
+        </div>
+      </section>
+
       {/* 8.5 ALTERNATIVE ONLINE CONTACT / QUOTE REQUEST FORM (PROPUESTA #1 - LEAD CAPTURE) */}
-      <section id="quote-form" className="py-20 bg-[#FBF9F5] border-b border-slate-200/80 scroll-mt-12">
+      <section id="quote-form" className="py-20 bg-white border-b border-slate-200/80 scroll-mt-12">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
           
           <div className="text-center max-w-2xl mx-auto space-y-2">

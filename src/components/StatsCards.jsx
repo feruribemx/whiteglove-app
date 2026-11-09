@@ -27,6 +27,14 @@ export default function StatsCards({ services, showFinances, currentUser, period
     if (s.status === 'cancelado') return sum;
     return sum + (Number(s.cobro) || 0);
   }, 0);
+  const totalCobrado = filteredServices.reduce((sum, s) => {
+    if (s.status === 'cancelado') return sum;
+    return (s.cobranzaStatus || 'pendiente') === 'pagado' ? sum + (Number(s.cobro) || 0) : sum;
+  }, 0);
+  const totalPorCobrar = filteredServices.reduce((sum, s) => {
+    if (s.status === 'cancelado') return sum;
+    return (s.cobranzaStatus || 'pendiente') !== 'pagado' ? sum + (Number(s.cobro) || 0) : sum;
+  }, 0);
   const totalCleanerPay = filteredServices.reduce((sum, s) => {
     if (s.status === 'cancelado') return sum;
     if (s.pagosPorCleaner && Object.keys(s.pagosPorCleaner).length > 0) {
@@ -194,9 +202,15 @@ export default function StatsCards({ services, showFinances, currentUser, period
                 </span>
                 <span className="text-xs text-slate-500 font-medium">CAD</span>
               </div>
-              <span className="text-[11px] text-emerald-700 font-medium mt-1">
-                Facturación bruta
-              </span>
+              <div className="flex items-center gap-2 flex-wrap mt-1.5 pt-1.5 border-t border-slate-100 text-[10px] font-bold">
+                <span className="text-emerald-700" title="Servicios marcados como Cobrados">
+                  ✅ ${totalCobrado.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="text-amber-700" title="Servicios Pendientes o Facturados por cobrar">
+                  ⏳ ${totalPorCobrar.toLocaleString('en-US', { maximumFractionDigits: 0 })} por cobrar
+                </span>
+              </div>
             </div>
 
             <div className="bg-gradient-to-br from-[#0B1D4A] to-[#1E3670] text-white p-4 rounded-2xl border border-slate-700 shadow-sm flex flex-col justify-between">

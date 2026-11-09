@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ClipboardList, Package, Calendar, BarChart3, DollarSign,
   Plus, LogOut, User, Menu, X, Shield, History, Globe,
-  ChevronDown, Check, Sparkles, ExternalLink, UserPlus, Mail, Sliders
+  ChevronDown, Check, Sparkles, ExternalLink, UserPlus, Mail, Sliders, FileText, Clock
 } from 'lucide-react';
-import { initialsOf, hasFullAccess } from '../lib/auth';
+import { initialsOf, hasFullAccess, isSupervisorFerCastil } from '../lib/auth';
 
 export default function Navbar({
   activeTab,
@@ -15,6 +15,7 @@ export default function Navbar({
   onOpenAuditLog,
   onOpenAddCleaner,
   onOpenRatesConfig,
+  onOpenClientDossier,
   onOpenDiagnostics,
   onPreviewLanding,
   onOpenInquiries,
@@ -32,6 +33,7 @@ export default function Navbar({
       (currentUser.role !== 'admin' && !['fernandouribe', 'michelleadmin', 'fercastil'].includes((currentUser.username || '').toLowerCase()))
     )
   );
+  const isFerCastil = isSupervisorFerCastil(currentUser);
   const isAdmin = currentUser?.role === 'admin';
   const showFinances = hasFullAccess(currentUser);
 
@@ -58,10 +60,11 @@ export default function Navbar({
 
   const navItems = isCleaner
     ? [
-        { id: 'registro', label: lang === 'en' ? 'My Shifts' : 'Mi Registro', icon: ClipboardList },
+        { id: 'registro', label: lang === 'en' ? 'Time Clock & Shifts' : 'Reloj Checador', icon: Clock },
         { id: 'schedule', label: lang === 'en' ? 'Calendar' : 'Calendario', icon: Calendar },
       ]
     : [
+        ...(isFerCastil ? [{ id: 'registro', label: lang === 'en' ? 'Time Clock' : 'Reloj Checador', icon: Clock }] : []),
         { id: 'services', label: lang === 'en' ? 'Services' : 'Servicios', icon: ClipboardList },
         { id: 'inventory', label: lang === 'en' ? 'Inventory' : 'Inventario', icon: Package },
         { id: 'schedule', label: lang === 'en' ? 'Schedule' : 'Calendario', icon: Calendar },
@@ -125,9 +128,24 @@ export default function Navbar({
             })}
           </nav>
 
-          {/* Right Action Zone: Inquiries Badge + Rates Config + Quick Capture + Integrated User Profile Dropdown */}
+          {/* Right Action Zone: Dossiers + Inquiries Badge + Rates Config + Quick Capture + Integrated User Profile Dropdown */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             
+            {/* Fichas Técnicas de Clientes (Available for Admin and Cleaners) */}
+            {onOpenClientDossier && (
+              <button
+                type="button"
+                onClick={() => onOpenClientDossier('')}
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-[#1E3670] hover:bg-[#28458c] border border-slate-700/80 hover:border-[#FFB566]/60 text-slate-100 hover:text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs"
+                title={lang === 'en' ? 'Client Property Dossiers (Addresses, Codes, Wi-Fi)' : 'Fichas Técnicas por Cliente (Direcciones, Códigos, Wi-Fi e Instrucciones)'}
+              >
+                <FileText className="w-3.5 h-3.5 text-[#FFB566]" />
+                <span className="hidden lg:inline">
+                  {lang === 'en' ? 'Client Dossiers' : 'Fichas Técnicas'}
+                </span>
+              </button>
+            )}
+
             {/* Tarifas por Hora Quick Button (Fernando & Michelle) */}
             {showFinances && onOpenRatesConfig && (
               <button
@@ -156,7 +174,7 @@ export default function Navbar({
                   {lang === 'en' ? 'Inquiries' : 'Prospectos'}
                 </span>
                 {inquiriesCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#FFB566] text-[#0B1D4A] animate-pulse">
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#FFB566] text-[#0B1D4A] tabular-nums">
                     {inquiriesCount}
                   </span>
                 )}
@@ -245,8 +263,32 @@ export default function Navbar({
                     </div>
                   </div>
 
-                  {/* Section A: Navigation & Admin Tools (Strictly guarded by showFinances) */}
+                  {/* Section A: Navigation & Admin/Cleaner Tools */}
                   <div className="p-2 space-y-1">
+                    {onOpenClientDossier && (
+                      <button
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          onOpenClientDossier('');
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-[#1E3670] transition-colors text-left"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-[#FFB566]/20 flex items-center justify-center text-[#FFB566] shrink-0">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1">
+                          <span className="block font-bold text-[#FAF7F1]">
+                            {lang === 'en' ? 'Client Technical Dossiers' : 'Fichas Técnicas de Clientes'}
+                          </span>
+                          <span className="text-[10px] text-slate-300 block font-normal">
+                            {lang === 'en'
+                              ? 'Addresses, lockbox codes, Wi-Fi & property instructions'
+                              : 'Direcciones, códigos de acceso, Wi-Fi e instrucciones por propiedad'}
+                          </span>
+                        </div>
+                      </button>
+                    )}
+
                     {showFinances && (
                       <>
                         {onOpenRatesConfig && (
@@ -522,6 +564,19 @@ export default function Navbar({
                 >
                   <Plus className="w-4 h-4 stroke-[3]" />
                   <span>{lang === 'en' ? 'New Service Entry' : 'Capturar Nuevo Servicio'}</span>
+                </button>
+              )}
+
+              {onOpenClientDossier && (
+                <button
+                  onClick={() => {
+                    onOpenClientDossier('');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-[#FAF7F1] bg-[#1E3670]/60 hover:bg-[#1E3670] rounded-xl"
+                >
+                  <FileText className="w-4 h-4 text-[#FFB566]" />
+                  <span>{lang === 'en' ? 'Client Technical Dossiers' : 'Fichas Técnicas por Cliente'}</span>
                 </button>
               )}
 

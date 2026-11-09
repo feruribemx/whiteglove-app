@@ -27,9 +27,10 @@ import {
   Copy,
   Send,
   Phone,
+  FileText,
 } from 'lucide-react';
 import { isMariaOrFerCastil, isMaferCleaner } from '../lib/auth';
-import { resolveClientMemory } from '../lib/clientMemory';
+import { resolveClientMemory, getClientDossier } from '../lib/clientMemory';
 
 const normalizeDateKey = (dateVal) => {
   if (!dateVal) return '';
@@ -101,6 +102,8 @@ export default function ScheduleView({
   onCancelService,
   onAddClient,
   onOpenAddCleaner,
+  onOpenClientDossier,
+  clientMemory = null,
   currentUser,
   cleanersDb = [],
 }) {
@@ -160,6 +163,7 @@ export default function ScheduleView({
   const [waCustomStart, setWaCustomStart] = useState(todayStr);
   const [waCustomEnd, setWaCustomEnd] = useState(todayStr);
   const [waPhoneInput, setWaPhoneInput] = useState('');
+  const [waIncludeDossier, setWaIncludeDossier] = useState(true);
   const [waCopied, setWaCopied] = useState(false);
 
   const getCleanerPhoneFromDb = (targetCleanerName) => {
@@ -201,16 +205,29 @@ export default function ScheduleView({
     const cleanersStr = (item.cleaners && item.cleaners.length ? item.cleaners : [item.cleaner]).join(', ');
     const primaryCleaner = item.cleaner || (item.cleaners && item.cleaners[0]) || '';
     const rawPhone = getCleanerPhoneFromDb(primaryCleaner);
+    const dossier = getClientDossier(item.unidad, clientMemory);
 
     let text = `🧹 *WHITEGLOVE - TURNO DE LIMPIEZA*\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `📅 *Fecha:* ${item.fecha}\n`;
     text += `⏰ *Hora:* ${item.hora || '09:00'} (${item.horas} hrs)\n`;
     text += `📍 *Unidad:* ${item.unidad}\n`;
+    if (dossier?.address) {
+      text += `🏠 *Dirección:* ${dossier.address}\n`;
+    }
+    if (dossier?.accessCode) {
+      text += `🔑 *Acceso / Lockbox:* ${dossier.accessCode}\n`;
+    }
+    if (dossier?.parkingInfo) {
+      text += `🚗 *Parking:* ${dossier.parkingInfo}\n`;
+    }
     text += `🧹 *Tipo:* ${item.tipo || 'Limpieza'}\n`;
     text += `👤 *Cleaner Asignado:* ${cleanersStr}\n`;
     if (item.notas) {
       text += `📝 *Notas:* ${item.notas}\n`;
+    }
+    if (dossier?.specialInstructions) {
+      text += `✨ *Ficha Técnica:* ${dossier.specialInstructions}\n`;
     }
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `_Favor de confirmar de recibido en WhatsApp._`;
@@ -748,6 +765,15 @@ export default function ScheduleView({
             msg += ` · 👥 Con: ${companions.join(', ')}`;
           }
           msg += `\n`;
+          if (waIncludeDossier) {
+            const doss = getClientDossier(it.unidad, clientMemory);
+            if (doss?.address) {
+              msg += `  🏠 Dir: ${doss.address}\n`;
+            }
+            if (doss?.accessCode) {
+              msg += `  🔑 Acceso: ${doss.accessCode}\n`;
+            }
+          }
           if (cleanNote) {
             msg += `  📝 _${cleanNote}_\n`;
           }
@@ -772,7 +798,7 @@ export default function ScheduleView({
       message: msg,
       waUrl,
     };
-  }, [waCleaner, waPeriod, waCustomStart, waCustomEnd, waPhoneInput, unifiedCalendarItems, currentDate, selectedDate, todayStr]);
+  }, [waCleaner, waPeriod, waCustomStart, waCustomEnd, waPhoneInput, waIncludeDossier, clientMemory, unifiedCalendarItems, currentDate, selectedDate, todayStr]);
 
   // Helper to split decimal hours into whole hours and snapped minutes (0, 15, 30, 45)
   const splitScheduleHours = (decVal) => {
@@ -1078,6 +1104,18 @@ export default function ScheduleView({
                 <User className="w-3.5 h-3.5 text-[#FFB566]" />
                 <span>{isSupervisorFer ? 'Mis Servicios (María - Fer Castil)' : `Mis Servicios (${cleanerName})`}</span>
               </div>
+            )}
+
+            {onOpenClientDossier && (
+              <button
+                type="button"
+                onClick={() => onOpenClientDossier('')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#FAF7F1] hover:bg-[#F3ECE0] text-[#0B1D4A] border border-[#E8DFC8] shadow-2xs transition-all cursor-pointer active:scale-98"
+                title="Consultar o editar la Ficha Técnica de cualquier cliente (Dirección, Código, Wi-Fi e Instrucciones)"
+              >
+                <FileText className="w-3.5 h-3.5 text-[#0B1D4A]" />
+                <span>📋 Fichas Técnicas</span>
+              </button>
             )}
 
             <button
@@ -1450,12 +1488,25 @@ export default function ScheduleView({
                       </div>
 
                       {/* Property / Unit */}
-                      <div className="flex items-center gap-1.5">
-                        <Building2 className="w-4 h-4 text-[#0B1D4A] shrink-0" />
-                        <span className="font-bold text-xs text-slate-900 truncate">{item.unidad}</span>
-                        <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded font-medium">
-                          {item.tipo || 'Limpieza'}
-                        </span>
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Building2 className="w-4 h-4 text-[#0B1D4A] shrink-0" />
+                          <span className="font-bold text-xs text-slate-900 truncate">{item.unidad}</span>
+                          <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded font-medium shrink-0">
+                            {item.tipo || 'Limpieza'}
+                          </span>
+                        </div>
+                        {onOpenClientDossier && item.unidad && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenClientDossier(item.unidad)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-[#FAF7F1] hover:bg-[#F3ECE0] text-[#0B1D4A] border border-[#E8DFC8] transition-colors shrink-0 cursor-pointer"
+                            title={`Ver Ficha Técnica de ${item.unidad} (Dirección, Acceso, Wi-Fi)`}
+                          >
+                            <FileText className="w-3 h-3 text-[#0B1D4A]" />
+                            <span>Ficha</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Cleaners assigned */}
@@ -1745,16 +1796,29 @@ export default function ScheduleView({
                     </div>
 
                     <div className="space-y-1">
-                      <div className="flex items-start gap-2">
-                        <Building2 className="w-4 h-4 text-[#0B1D4A] shrink-0 mt-0.5" />
-                        <div>
-                          <h4 className="font-bold text-sm text-[#0B1D4A] leading-tight">
-                            {item.unidad}
-                          </h4>
-                          <span className="text-xs text-slate-500">
-                            {item.tipo || 'Limpieza'}
-                          </span>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <Building2 className="w-4 h-4 text-[#0B1D4A] shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm text-[#0B1D4A] leading-tight truncate">
+                              {item.unidad}
+                            </h4>
+                            <span className="text-xs text-slate-500">
+                              {item.tipo || 'Limpieza'}
+                            </span>
+                          </div>
                         </div>
+                        {onOpenClientDossier && item.unidad && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenClientDossier(item.unidad)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#FAF7F1] hover:bg-[#F3ECE0] text-[#0B1D4A] border border-[#E8DFC8] transition-colors shrink-0 cursor-pointer"
+                            title={`Ver Ficha Técnica de ${item.unidad}`}
+                          >
+                            <FileText className="w-3 h-3 text-[#0B1D4A]" />
+                            <span>📋 Ficha</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -2261,26 +2325,52 @@ export default function ScheduleView({
                 )}
               </div>
 
-              {/* Optional Cleaner WhatsApp Phone Number */}
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <div>
-                    <span className="font-bold text-slate-800 block">
-                      Teléfono WhatsApp de {waCleaner} (Opcional)
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Si lo ingresas, abrirá directo su chat; si lo dejas vacío, podrás elegir el contacto en WhatsApp.
-                    </span>
+              {/* Optional Cleaner WhatsApp Phone Number & Dossier Toggle */}
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <span className="font-bold text-slate-800 block">
+                        Teléfono WhatsApp de {waCleaner} (Opcional)
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        Si lo ingresas, abrirá directo su chat; si lo dejas vacío, podrás elegir el contacto en WhatsApp.
+                      </span>
+                    </div>
                   </div>
+                  <input
+                    type="tel"
+                    placeholder="Ej: 16475550123"
+                    value={waPhoneInput}
+                    onChange={(e) => setWaPhoneInput(e.target.value)}
+                    className="sm:w-44 px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
                 </div>
-                <input
-                  type="tel"
-                  placeholder="Ej: 16475550123"
-                  value={waPhoneInput}
-                  onChange={(e) => setWaPhoneInput(e.target.value)}
-                  className="sm:w-44 px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                />
+
+                <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2 flex-wrap">
+                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={waIncludeDossier}
+                      onChange={(e) => setWaIncludeDossier(e.target.checked)}
+                      className="rounded border-slate-300 text-[#0B1D4A] focus:ring-[#0B1D4A]"
+                    />
+                    <span className="text-xs font-bold text-[#0B1D4A]">
+                      📋 Incluir Ficha Técnica del Cliente en el WhatsApp (Dirección y Código de Acceso)
+                    </span>
+                  </label>
+                  {onOpenClientDossier && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenClientDossier('')}
+                      className="text-[11px] font-bold text-[#0B1D4A] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <FileText className="w-3 h-3" />
+                      <span>Editar Fichas Técnicas</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Filtered Services Summary & Preview */}

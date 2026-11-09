@@ -13,6 +13,8 @@ import AddCleanerModal from './components/AddCleanerModal';
 import SystemDiagnosticsModal from './components/SystemDiagnosticsModal';
 import InquiriesModal from './components/InquiriesModal';
 import RatesConfigModal from './components/RatesConfigModal';
+import ClientDossierModal from './components/ClientDossierModal';
+import CleanerTimeClock from './components/CleanerTimeClock';
 import LoginView from './components/LoginView';
 import LandingView from './components/LandingView';
 import Toast from './components/Toast';
@@ -110,7 +112,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   // UI Navigation & Modals
-  const [activeTab, setActiveTab] = useState(() => (isUserCleaner ? 'registro' : 'services'));
+  const [activeTab, setActiveTab] = useState(() =>
+    isUserCleaner || isSupervisorFerCastil(currentUser) ? 'registro' : 'services'
+  );
   const [periodFilter, setPeriodFilter] = useState('all');
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [serviceToEdit, setServiceToEdit] = useState(null);
@@ -123,6 +127,7 @@ export default function App() {
   const [inquiries, setInquiries] = useState([]);
   const [isInquiriesModalOpen, setIsInquiriesModalOpen] = useState(false);
   const [clientMemory, setClientMemory] = useState(() => getSavedClientMemory());
+  const [dossierModalUnit, setDossierModalUnit] = useState(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [previewLanding, setPreviewLanding] = useState(false);
 
@@ -342,7 +347,9 @@ export default function App() {
     try {
       localStorage.setItem('wg-current-user', JSON.stringify(user));
     } catch {}
-    setActiveTab(user.role === 'cleaner' ? 'registro' : 'services');
+    setActiveTab(
+      user.role === 'cleaner' || isSupervisorFerCastil(user) ? 'registro' : 'services'
+    );
     addToast('Bienvenido', `Sesión iniciada como ${user.displayName || user.username}`);
   };
 
@@ -544,6 +551,67 @@ export default function App() {
     } catch {}
   };
 
+  // Client Billing / Collection Status Toggle (Master Admins Only)
+  const handleToggleCobranza = async (idOrIds, nextStatus = 'pagado') => {
+    if (!hasFullAccess(currentUser)) return;
+    const ids = (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).map(String);
+    if (ids.length === 0) return;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const updatedRecords = [];
+
+    setServices((prev) =>
+      prev.map((s) => {
+        if (ids.includes(String(s.id))) {
+          const updated = {
+            ...s,
+            cobranzaStatus: nextStatus,
+            fechaCobro: nextStatus === 'pagado' ? (s.fechaCobro || todayStr) : s.fechaCobro || '',
+            updatedAt: new Date().toISOString(),
+          };
+          updatedRecords.push(updated);
+          return updated;
+        }
+        return s;
+      })
+    );
+
+    // Persist to Firestore & Offline Cache
+    try {
+      await Promise.all(
+        updatedRecords.map((rec) => saveServiceToFirestore(rec).catch(() => {}))
+      );
+      const cached = JSON.parse(localStorage.getItem('wg-offline-services') || '[]');
+      const mapUpdated = new Map(updatedRecords.map((r) => [String(r.id), r]));
+      const nextCache = cached.map((c) => mapUpdated.get(String(c.id)) || c);
+      localStorage.setItem('wg-offline-services', JSON.stringify(nextCache));
+    } catch (err) {
+      console.warn('Cobranza cloud sync notice:', err);
+    }
+
+    const statusLabel =
+      nextStatus === 'pagado'
+        ? 'Cobrado (Pagado)'
+        : nextStatus === 'facturado'
+        ? 'Facturado / Enviado'
+        : 'Por Cobrar (Pendiente)';
+
+    addToast(
+      'Estado de Cobranza Actualizado',
+      ids.length === 1
+        ? `Servicio marcado como: ${statusLabel}`
+        : `${ids.length} servicios marcados como: ${statusLabel}`
+    );
+
+    try {
+      saveAuditLogToFirestore({
+        actor: currentUser?.displayName || currentUser?.username || 'Admin',
+        action: 'UPDATE_COBRANZA_STATUS',
+        details: `Actualizó estado de cobranza a "${statusLabel}" en ${ids.length} servicio(s).`,
+      });
+    } catch {}
+  };
+
   // Inventory Management (Cloud Sync)
   const handleUpdateStockByUnit = async (unit, nextItems) => {
     setStockByUnit((prev) => ({ ...prev, [unit]: nextItems }));
@@ -736,6 +804,7 @@ export default function App() {
         onOpenNewService={handleOpenNewService}
         onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
         onOpenRatesConfig={showFinancials ? () => setIsRatesConfigModalOpen(true) : null}
+        onOpenClientDossier={(u) => setDossierModalUnit(typeof u === 'string' ? u : '')}
         onOpenAuditLog={showFinancials ? () => setIsAuditModalOpen(true) : null}
         onOpenDiagnostics={showFinancials ? () => setIsDiagnosticsModalOpen(true) : null}
         onPreviewLanding={() => setPreviewLanding(true)}
@@ -767,16 +836,37 @@ export default function App() {
             onEditService={handleEditService}
             onCancelService={handleCancelService}
             onDeleteService={hasFullAccess(currentUser) ? handleDeleteService : null}
+            onToggleCobranza={showFinancials ? handleToggleCobranza : null}
             onOpenNewService={handleOpenNewService}
             onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
             onOpenRatesConfig={showFinancials ? () => setIsRatesConfigModalOpen(true) : null}
+            onOpenClientDossier={(u) => setDossierModalUnit(typeof u === 'string' ? u : '')}
           />
         )}
 
         {activeTab === 'registro' && (
-          /* Personal cleaner view of their logged hours */
-          <div className="space-y-4">
-            {/* Upcoming Services Notice for Cleaners */}
+          /* Primary Cleaner View: #1 Reloj Checador (Time Clock) + Scheduled Shifts + Personal Shift History */
+          <div className="space-y-5">
+            {/* 1. RELOJ CHECADOR DE SERVICIO (Lo primero que ven al iniciar sesión) */}
+            <CleanerTimeClock
+              currentUser={
+                isSupervisorFerCastil(currentUser)
+                  ? { ...currentUser, displayName: 'Maria', username: 'Maria' }
+                  : currentUser
+              }
+              availableUnits={availableUnits}
+              services={visibleServices}
+              schedule={visibleSchedule}
+              rates={rates}
+              ratesConfig={ratesConfig}
+              clientMemory={clientMemory}
+              onSaveService={handleSaveService}
+              onUpdateSchedule={handleUpdateSchedule}
+              onOpenClientDossier={(u) => setDossierModalUnit(typeof u === 'string' ? u : '')}
+              onOpenCalendar={() => setActiveTab('schedule')}
+            />
+
+            {/* 2. Upcoming Services Notice for Cleaners */}
             <div className="bg-gradient-to-r from-[#0B1D4A] to-[#1E3670] text-white p-4 rounded-2xl border border-slate-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-[#FFB566]/20 border border-[#FFB566]/40 flex items-center justify-center shrink-0">
@@ -787,7 +877,7 @@ export default function App() {
                     Tu Calendario de Servicios Programados
                   </h3>
                   <p className="text-xs text-slate-300">
-                    Consulta las fechas y turnos futuros donde estás asignado en el sistema
+                    Consulta las fechas y turnos futuros donde estás asignada en el sistema
                   </p>
                 </div>
               </div>
@@ -800,13 +890,14 @@ export default function App() {
               </button>
             </div>
 
+            {/* 3. Historial de Turnos Realizados */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-serif font-semibold text-[#0B1D4A]">
-                  Mis Turnos Realizados ({currentUser.displayName || currentUser.username})
+                  Mis Turnos Realizados ({isSupervisorFerCastil(currentUser) ? 'Maria' : (currentUser.displayName || currentUser.username)})
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Historial de horas trabajadas registradas en el sistema para tu nómina
+                  Historial de horas trabajadas y registros del reloj checador vinculados a tu nómina
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -818,24 +909,25 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => handleOpenNewService({
-                    cleaner: currentUser.displayName || currentUser.username,
-                    cleaners: [currentUser.displayName || currentUser.username]
+                    cleaner: isSupervisorFerCastil(currentUser) ? 'Maria' : (currentUser.displayName || currentUser.username),
+                    cleaners: [isSupervisorFerCastil(currentUser) ? 'Maria' : (currentUser.displayName || currentUser.username)]
                   })}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#FFB566] text-[#0B1D4A] font-bold text-xs rounded-xl hover:brightness-105 active:scale-98 transition-all shadow-xs shrink-0 cursor-pointer"
                 >
-                  + Registrar Mi Servicio
+                  + Registrar Manualmente
                 </button>
               </div>
             </div>
             <ServicesList
               services={visibleServices}
               currentUser={currentUser}
-              onEditService={() => {}}
-              onCancelService={() => {}}
+              onEditService={handleEditService}
+              onCancelService={isSupervisorFerCastil(currentUser) ? handleCancelService : () => {}}
               onDeleteService={() => {}}
+              onOpenClientDossier={(u) => setDossierModalUnit(typeof u === 'string' ? u : '')}
               onOpenNewService={() => handleOpenNewService({
-                cleaner: currentUser.displayName || currentUser.username,
-                cleaners: [currentUser.displayName || currentUser.username]
+                cleaner: isSupervisorFerCastil(currentUser) ? 'Maria' : (currentUser.displayName || currentUser.username),
+                cleaners: [isSupervisorFerCastil(currentUser) ? 'Maria' : (currentUser.displayName || currentUser.username)]
               })}
             />
           </div>
@@ -865,6 +957,8 @@ export default function App() {
             onCancelService={handleCancelService}
             onAddClient={handleAddClient}
             onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
+            onOpenClientDossier={(u) => setDossierModalUnit(typeof u === 'string' ? u : '')}
+            clientMemory={clientMemory}
             currentUser={currentUser}
             cleanersDb={cleanersDb}
           />
@@ -877,9 +971,11 @@ export default function App() {
             periodFilter={periodFilter}
             setPeriodFilter={setPeriodFilter}
             onEditService={handleEditService}
+            onUpdateService={handleSaveService}
             onCancelService={handleCancelService}
             onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
             currentUser={currentUser}
+            ratesConfig={ratesConfig}
           />
         )}
 
@@ -899,6 +995,7 @@ export default function App() {
           onAddClient={handleAddClient}
           onOpenAddCleaner={canRegisterCleaners(currentUser) ? () => setIsAddCleanerModalOpen(true) : null}
           onOpenRatesConfig={showFinancials ? () => setIsRatesConfigModalOpen(true) : null}
+          onOpenClientDossier={(u) => setDossierModalUnit(typeof u === 'string' ? u : '')}
           availableUnits={availableUnits}
           availableCleaners={visibleCleaners}
           rates={rates}
@@ -906,6 +1003,23 @@ export default function App() {
           currentUser={currentUser}
           services={visibleServices}
           clientMemory={clientMemory}
+        />
+      )}
+
+      {/* Client Technical Dossier Modal (Strictly for Administrators and Cleaners in the Work Portal) */}
+      {dossierModalUnit !== null && (
+        <ClientDossierModal
+          isOpen={dossierModalUnit !== null}
+          onClose={() => setDossierModalUnit(null)}
+          initialUnit={dossierModalUnit}
+          availableUnits={availableUnits}
+          clientMemory={clientMemory}
+          currentUser={currentUser}
+          onAddClient={handleAddClient}
+          onSaveDossier={(unitName, updatedEntry) => {
+            setClientMemory((prev) => ({ ...(prev || {}), [unitName]: updatedEntry }));
+            addToast('Ficha Técnica Guardada', `Ficha técnica de "${unitName}" sincronizada en la nube.`);
+          }}
         />
       )}
 

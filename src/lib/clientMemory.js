@@ -1,15 +1,104 @@
-// Client Memory and Auto-fill management for recurring clients
+// Client Memory, Auto-fill, and Technical Property Dossier (Ficha Técnica) management
 const STORAGE_KEY = 'wg_client_memory';
 
-// Default presets for high-frequency or newly added clients
+// Default presets for high-frequency or newly added clients (includes default Ficha Técnica fields)
 const KNOWN_CLIENT_PRESETS = {
-  'mohammed': { cobro: 220, tipo: 'Limpieza', horas: 3 },
-  'phillys': { cobro: 180, tipo: 'Limpieza', horas: 2.5 },
-  'phillis': { cobro: 180, tipo: 'Limpieza', horas: 2.5 },
-  'chand': { cobro: 185, tipo: 'Limpieza', horas: 2.5 },
-  'rohan unit a': { cobro: 195, tipo: 'Limpieza', horas: 2 },
-  'rohan unit b': { cobro: 195, tipo: 'Limpieza', horas: 2 },
-  'ocean villa 4': { cobro: 240, tipo: 'Limpieza', horas: 3 },
+  'mohammed': {
+    cobro: 220,
+    tipo: 'Limpieza',
+    horas: 3,
+    address: '88 Blue Jays Way, Penthouse 4201, Toronto, ON',
+    accessCode: 'Smart Lock: #4820* (Concierge piso PB)',
+    wifiInfo: 'Red: Bell_PH4201 | Pass: WhiteGlove2026',
+    parkingInfo: 'Visitor Parking P1 (Solicitar pase en recepción)',
+    suppliesLocation: 'Closet de lavado junto a cocina; blancos limpios en armario principal',
+    petAndAllergyNotes: 'Sin mascotas. Pisos de mármol y madera noble (usar limpiador neutro).',
+    specialInstructions: 'Priorizar ventanales de sala, cocina gourmet y doblado tipo hotel en recámara principal.',
+  },
+  'phillys': {
+    cobro: 180,
+    tipo: 'Limpieza',
+    horas: 2.5,
+    address: '214 St George St, Suite 904, Toronto, ON',
+    accessCode: 'Lockbox lateral: 1955',
+    wifiInfo: 'Red: Rogers_904 | Pass: StGeorge904',
+    parkingInfo: 'Estacionamiento en calle con parquímetro o entrada trasera',
+    suppliesLocation: 'Debajo de tarja de cocina y closet del pasillo',
+    petAndAllergyNotes: '1 gato tranquilo (no dejar puerta principal abierta).',
+    specialInstructions: 'Desinfectar baños a detalle y aspirar alfombras con filtro HEPA.',
+  },
+  'phillis': {
+    cobro: 180,
+    tipo: 'Limpieza',
+    horas: 2.5,
+    address: '214 St George St, Suite 904, Toronto, ON',
+    accessCode: 'Lockbox lateral: 1955',
+    wifiInfo: 'Red: Rogers_904 | Pass: StGeorge904',
+    parkingInfo: 'Estacionamiento en calle con parquímetro o entrada trasera',
+    suppliesLocation: 'Debajo de tarja de cocina y closet del pasillo',
+    petAndAllergyNotes: '1 gato tranquilo (no dejar puerta principal abierta).',
+    specialInstructions: 'Desinfectar baños a detalle y aspirar alfombras con filtro HEPA.',
+  },
+  'chand': {
+    cobro: 185,
+    tipo: 'Limpieza',
+    horas: 2.5,
+    address: '120 Bayview Ave, Residence 14B, Toronto, ON',
+    accessCode: 'Teclado puerta: 7391#',
+    wifiInfo: 'Red: Chand_Home5G | Pass: Bayview14B',
+    parkingInfo: 'Driveway frontal disponible durante la limpieza',
+    suppliesLocation: 'Cuarto de servicio en planta baja',
+    petAndAllergyNotes: 'Usar productos hipoalergénicos sin fragancia fuerte.',
+    specialInstructions: 'Limpieza detallada de cocina, campana extractora y cristales interiores.',
+  },
+  'rohan unit a': {
+    cobro: 195,
+    tipo: 'Limpieza',
+    horas: 2,
+    address: '455 King St W, Unit A (Airbnb Executive), Toronto, ON',
+    accessCode: 'August Smart Lock: 3389',
+    wifiInfo: 'Red: Rohan_Guest_A | Pass: WelcomeToronto',
+    parkingInfo: 'Loading Zone por Spadina Ave (15 min descarga)',
+    suppliesLocation: 'Owner Locker en baño secundario (Código candado: 042)',
+    petAndAllergyNotes: 'Unidad libre de humo y mascotas (reportar cualquier olor de inmediato).',
+    specialInstructions: 'Turnover Airbnb: cambiar sábanas, dejar 2 cápsulas Nespresso, 2 rollos de papel y tomar foto final.',
+  },
+  'rohan unit b': {
+    cobro: 195,
+    tipo: 'Limpieza',
+    horas: 2,
+    address: '455 King St W, Unit B (Airbnb Executive), Toronto, ON',
+    accessCode: 'August Smart Lock: 3390',
+    wifiInfo: 'Red: Rohan_Guest_B | Pass: WelcomeToronto',
+    parkingInfo: 'Loading Zone por Spadina Ave',
+    suppliesLocation: 'Owner Locker en pasillo de entrada (Código candado: 042)',
+    petAndAllergyNotes: 'Unidad libre de humo y mascotas.',
+    specialInstructions: 'Turnover Airbnb: verificar interior de refrigerador, microondas y amenidades de baño.',
+  },
+  'ocean villa 4': {
+    cobro: 240,
+    tipo: 'Limpieza',
+    horas: 3,
+    address: '180 Lakeshore Rd E, Villa 4, Oakville / GTA, ON',
+    accessCode: 'Caseta de seguridad + Código puerta: 9012*',
+    wifiInfo: 'Red: LakeshoreVilla4 | Pass: VillaLuxury4',
+    parkingInfo: 'Cochera privada espacio #4',
+    suppliesLocation: 'Cuarto de lavado en segundo nivel',
+    petAndAllergyNotes: 'Superficies de cuarzo blanco en cocina (no usar abrasivos).',
+    specialInstructions: 'Revisar terraza, ventanales panorámicos y acomodo de toallas tipo spa.',
+  },
+  'georgia': {
+    cobro: 210,
+    tipo: 'Limpieza',
+    horas: 3,
+    address: '310 Avenue Rd, Yorkville Residence, Toronto, ON',
+    accessCode: 'Recepción autoriza acceso a equipo WhiteGlove',
+    wifiInfo: 'Red: Yorkville_310 | Pass: Georgia310',
+    parkingInfo: 'Estacionamiento subterráneo visitas B1',
+    suppliesLocation: 'Closet de blancos frente a baño principal',
+    petAndAllergyNotes: 'Cuidado especial con grifería dorada y espejos.',
+    specialInstructions: 'Limpieza residencial completa y cambio de ropa de cama en 2 recámaras.',
+  },
 };
 
 /**
@@ -23,6 +112,65 @@ export function getSavedClientMemory() {
     console.error('Error reading client memory from localStorage:', err);
     return {};
   }
+}
+
+/**
+ * Resolves the Technical Dossier (Ficha Técnica) for a given client/unit
+ */
+export function getClientDossier(unitName, liveMemory = null) {
+  if (!unitName || typeof unitName !== 'string') return null;
+  const trimmed = unitName.trim();
+  const lower = trimmed.toLowerCase();
+
+  const saved =
+    liveMemory && typeof liveMemory === 'object' && Object.keys(liveMemory).length > 0
+      ? liveMemory
+      : getSavedClientMemory();
+
+  let localData = saved[trimmed] || null;
+  if (!localData) {
+    const foundKey = Object.keys(saved).find((k) => k.trim().toLowerCase() === lower);
+    if (foundKey) localData = saved[foundKey];
+  }
+
+  const preset = KNOWN_CLIENT_PRESETS[lower] || {};
+
+  const address = localData?.address ?? preset.address ?? '';
+  const accessCode = localData?.accessCode ?? preset.accessCode ?? '';
+  const wifiInfo = localData?.wifiInfo ?? preset.wifiInfo ?? '';
+  const parkingInfo = localData?.parkingInfo ?? preset.parkingInfo ?? '';
+  const suppliesLocation = localData?.suppliesLocation ?? preset.suppliesLocation ?? '';
+  const petAndAllergyNotes = localData?.petAndAllergyNotes ?? preset.petAndAllergyNotes ?? '';
+  const specialInstructions =
+    localData?.specialInstructions ?? localData?.notes ?? preset.specialInstructions ?? '';
+  const contactPhone = localData?.contactPhone ?? preset.contactPhone ?? '';
+  const updatedBy = localData?.updatedBy || 'Administración WhiteGlove';
+  const updatedAt = localData?.updatedAt || null;
+
+  const hasContent = Boolean(
+    address ||
+      accessCode ||
+      wifiInfo ||
+      parkingInfo ||
+      suppliesLocation ||
+      petAndAllergyNotes ||
+      specialInstructions
+  );
+
+  return {
+    unitName: trimmed,
+    address,
+    accessCode,
+    wifiInfo,
+    parkingInfo,
+    suppliesLocation,
+    petAndAllergyNotes,
+    specialInstructions,
+    contactPhone,
+    updatedBy,
+    updatedAt,
+    hasContent,
+  };
 }
 
 import { saveSettingToFirestore } from './firebase';
@@ -216,7 +364,7 @@ export function resolveClientMemory(unitName, services = [], liveMemory = null, 
     notes: cleanNotes,
     totalServices,
     isRecurring,
-    lastService,
+    lastService: latestService || null,
     lastServiceDate: latestService?.fecha || recentWithCobro?.fecha || latestScheduleItem?.fecha || null,
     source: latestService
       ? 'Último Servicio'
